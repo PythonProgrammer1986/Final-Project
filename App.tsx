@@ -15,7 +15,8 @@ import {
   Cloud,
   CloudOff,
   Wifi,
-  WifiOff
+  WifiOff,
+  ShieldAlert
 } from 'lucide-react';
 import { AppState, Task, Project, Activity, KPI, SafetyStatus } from './types';
 import { BRAND, DEFAULT_USERS, DEFAULT_CATEGORIES, DEFAULT_AGENDA } from './constants';
@@ -56,7 +57,7 @@ const App: React.FC = () => {
   const isUpdatingRef = useRef(false);
   const lastCloudHashRef = useRef<string>('');
 
-  // Robust Sync Engine
+  // Primary Sync Function
   const syncWithCloud = useCallback(async (direction: 'push' | 'pull', stateToPush?: AppState) => {
     if (!syncId) {
       setIsConnected(false);
@@ -67,22 +68,39 @@ const App: React.FC = () => {
     const url = `${SYNC_API_BASE}/${syncId}`;
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+
       if (direction === 'push' && stateToPush) {
         const currentHash = JSON.stringify(stateToPush);
-        // Don't push if data hasn't changed since last pull/push
         if (currentHash === lastCloudHashRef.current) {
           setIsSyncing(false);
+          clearTimeout(timeoutId);
           return;
         }
 
-        await fetch(url, {
+        const res = await fetch(url, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: currentHash
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: currentHash,
+          signal: controller.signal
         });
-        lastCloudHashRef.current = currentHash;
+        
+        if (res.ok) {
+          lastCloudHashRef.current = currentHash;
+          setIsConnected(true);
+        } else {
+          setIsConnected(false);
+        }
       } else {
-        const response = await fetch(url);
+        const response = await fetch(url, { 
+          headers: { 'Accept': 'application/json' },
+          signal: controller.signal 
+        });
+        
         if (response.ok) {
           const cloudData = await response.json();
           const cloudHash = JSON.stringify(cloudData);
@@ -94,11 +112,12 @@ const App: React.FC = () => {
             setTimeout(() => { isUpdatingRef.current = false; }, 500);
           }
           setIsConnected(true);
-        } else if (response.status === 404) {
-          setIsConnected(false); // ID no longer exists
+        } else {
+          setIsConnected(false);
         }
       }
       setLastSyncTime(new Date());
+      clearTimeout(timeoutId);
     } catch (error) {
       console.error("Cloud Sync Error:", error);
       setIsConnected(false);
@@ -107,69 +126,85 @@ const App: React.FC = () => {
     }
   }, [syncId, data]);
 
-  // Initial Sync & Periodical Pull
+  // Periodic Pulling
   useEffect(() => {
     if (syncId) {
       syncWithCloud('pull');
-      const interval = setInterval(() => syncWithCloud('pull'), 15000); // Poll every 15s
+      const interval = setInterval(() => syncWithCloud('pull'), 20000);
       return () => clearInterval(interval);
     }
   }, [syncId, syncWithCloud]);
 
-  // Handle Local Data Changes (Push)
+  // Save Local & Push Changes
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     
     if (syncId && !isUpdatingRef.current) {
       const timer = setTimeout(() => {
         syncWithCloud('push', data);
-      }, 1500); // Debounce push to avoid too many requests
+      }, 2000);
       return () => clearTimeout(timer);
     }
   }, [data, syncId, syncWithCloud]);
 
-  // Connection Handler (Masters Tab)
-  const updateSyncId = async (id: string) => {
-    if (!id || id.trim() === '') {
+  // Masters Tab Connection Management
+  const updateSyncId = async (id: string, isNew: boolean = false) => {
+    if (!id && !isNew) {
       setSyncId('');
       setIsConnected(false);
       localStorage.removeItem(SYNC_KEY_STORAGE);
       return;
     }
 
-    const trimmedId = id.trim();
     setIsSyncing(true);
     try {
-      // 1. Try to fetch existing
-      const res = await fetch(`${SYNC_API_BASE}/${trimmedId}`);
-      if (res.ok) {
-        const cloudData = await res.json();
-        setData(cloudData);
-        setSyncId(trimmedId);
-        localStorage.setItem(SYNC_KEY_STORAGE, trimmedId);
-        setIsConnected(true);
-        alert('Connected to Shared Team Database!');
-      } else {
-        // 2. If not found, create new
+      if (isNew) {
+        // Step 1: Create fresh blob on server
         const createRes = await fetch(SYNC_API_BASE, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
           body: JSON.stringify(data)
         });
+
         if (createRes.ok) {
-          // Extract ID from Location header: https://jsonblob.com/api/jsonBlob/ID
           const location = createRes.headers.get('Location');
-          const newId = location ? location.split('/').pop() : trimmedId;
+          const newId = location ? location.split('/').pop() : null;
+          
           if (newId) {
             setSyncId(newId);
             localStorage.setItem(SYNC_KEY_STORAGE, newId);
             setIsConnected(true);
-            alert(`New Team Database Created! Key: ${newId}`);
+            alert(`SUCCESS: New Team Database Created!\n\nYour Team Key is: ${newId}\n\nShare this key with your team members.`);
+          } else {
+            throw new Error("Could not parse ID from server.");
           }
+        } else {
+          throw new Error(`Server returned ${createRes.status}`);
+        }
+      } else {
+        // Step 2: Join existing
+        const trimmedId = id.trim();
+        const res = await fetch(`${SYNC_API_BASE}/${trimmedId}`, {
+          headers: { 'Accept': 'application/json' }
+        });
+        
+        if (res.ok) {
+          const cloudData = await res.json();
+          setData(cloudData);
+          setSyncId(trimmedId);
+          localStorage.setItem(SYNC_KEY_STORAGE, trimmedId);
+          setIsConnected(true);
+          alert('SUCCESS: Connected to Team Database!');
+        } else {
+          alert(`ERROR: Could not find a team database with ID: ${trimmedId}\n\nPlease check the key and try again.`);
         }
       }
-    } catch (e) {
-      alert('Network Error: Could not reach sync servers.');
+    } catch (e: any) {
+      console.error(e);
+      alert(`NETWORK ERROR: Could not reach sync servers.\n\nPossible reasons:\n1. Corporate firewall is blocking jsonblob.com\n2. No internet connection\n3. The sync service is temporarily down.\n\nError details: ${e.message}`);
       setIsConnected(false);
     } finally {
       setIsSyncing(false);
@@ -192,14 +227,14 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8F9FA]">
-      {/* Dynamic Sync Banner for Unsynced Users */}
+      {/* Critical Sync Alert */}
       {!syncId && (
-        <div className="bg-[#FDB913] text-black text-[11px] font-extrabold py-2 px-8 flex justify-between items-center animate-in slide-in-from-top duration-500">
+        <div className="bg-[#FDB913] text-black text-[11px] font-extrabold py-2 px-8 flex justify-between items-center shadow-lg border-b border-black/10 z-50">
            <div className="flex items-center space-x-2">
-             <CloudOff size={14} />
-             <span>TEAM SYNC DISABLED: YOU ARE CURRENTLY IN LOCAL MODE. CHANGES ARE NOT SHARED.</span>
+             <ShieldAlert size={14} className="animate-pulse" />
+             <span>ACTION REQUIRED: TEAM DATA SHARING IS DISABLED. GO TO 'MASTERS' TO CONNECT YOUR TEAM.</span>
            </div>
-           <button onClick={() => setActiveTab('masters')} className="underline hover:no-underline">OPEN SYNC SETTINGS →</button>
+           <button onClick={() => setActiveTab('masters')} className="bg-black text-white px-3 py-1 rounded-sm text-[9px] hover:bg-zinc-800 transition">SETUP NOW →</button>
         </div>
       )}
 
@@ -207,25 +242,25 @@ const App: React.FC = () => {
       <header className="bg-black text-white h-24 flex items-center px-8 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-1/3 h-full bg-[#FDB913] skew-x-[-20deg] translate-x-20 z-0"></div>
         <div className="flex items-center z-10 space-x-6">
-          <div className="bg-[#FDB913] w-14 h-14 flex items-center justify-center font-bold text-3xl text-black rounded-sm shadow-lg">
+          <div className="bg-[#FDB913] w-14 h-14 flex items-center justify-center font-bold text-3xl text-black rounded-sm shadow-lg border-2 border-black/20">
             E
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">EPIROC ROCKDRILL AB</h1>
-            <div className="flex items-center space-x-2 text-[10px] opacity-80 uppercase tracking-widest font-medium">
-              <span>Enterprise Management System</span>
+            <h1 className="text-2xl font-black tracking-tight uppercase">Epiroc Rockdrill</h1>
+            <div className="flex items-center space-x-2 text-[10px] opacity-80 uppercase tracking-widest font-bold">
+              <span>Management System</span>
               <span className="text-[#FDB913]">•</span>
               {isConnected ? (
-                <span className="flex items-center text-green-400 font-bold">
-                  <Wifi size={10} className="mr-1 animate-pulse" /> CLOUD DATABASE CONNECTED
+                <span className="flex items-center text-green-400">
+                  <Wifi size={10} className="mr-1" /> CLOUD: CONNECTED
                 </span>
               ) : syncId ? (
-                <span className="flex items-center text-red-400 font-bold">
-                  <WifiOff size={10} className="mr-1" /> CONNECTION LOST - RECONNECTING...
+                <span className="flex items-center text-red-500">
+                  <WifiOff size={10} className="mr-1 animate-pulse" /> CLOUD: DISCONNECTED
                 </span>
               ) : (
-                <span className="flex items-center text-gray-500">
-                   STANDALONE MODE
+                <span className="flex items-center text-gray-400">
+                   MODE: LOCAL ONLY
                 </span>
               )}
             </div>
@@ -234,27 +269,26 @@ const App: React.FC = () => {
         
         <div className="flex-1"></div>
 
-        <div className="flex items-center space-x-4 z-10 text-black font-semibold">
+        <div className="flex items-center space-x-4 z-10">
            {isSyncing && (
-             <div className="flex items-center space-x-2 text-white text-[10px] mr-4">
-               <RefreshCw size={12} className="animate-spin text-[#FDB913]" />
-               <span className="tracking-tighter">DATA SYNC...</span>
+             <div className="flex items-center space-x-2 text-[#FDB913] text-[9px] font-black mr-4 uppercase">
+               <RefreshCw size={12} className="animate-spin" />
+               <span>Syncing...</span>
              </div>
            )}
-           <div className="relative group">
-              <button className="p-2 bg-white rounded shadow-sm hover:bg-gray-100 transition">
-                <Bell size={20} className={notifications.length > 0 ? "text-red-500 animate-bounce" : ""} />
-                {notifications.length > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">{notifications.length}</span>}
-              </button>
+           <div className="flex flex-col items-end pr-4 border-r border-white/10 mr-4">
+             <span className="text-[9px] text-gray-500 uppercase font-black">Active Session</span>
+             <span className="text-[#FDB913] text-xs font-mono font-bold tracking-widest">
+               {syncId ? syncId : 'NONE'}
+             </span>
            </div>
-           <div className="flex flex-col items-end">
-             <span className="text-white text-[10px] opacity-60 uppercase tracking-tighter">Current Session</span>
-             <span className="text-[#FDB913] text-xs font-mono">{syncId ? `ID: ${syncId.substring(0,8)}...` : 'OFFLINE'}</span>
+           <div className="p-2 bg-white/10 rounded-full border border-white/5">
+             <Bell size={18} className={notifications.length > 0 ? "text-[#FDB913]" : "text-gray-500"} />
            </div>
         </div>
       </header>
 
-      {/* Tabs Navigation */}
+      {/* Tabs */}
       <nav className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
         <div className="max-w-7xl mx-auto flex">
           {tabs.map(tab => (
@@ -263,18 +297,18 @@ const App: React.FC = () => {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center space-x-2 px-6 py-4 transition-all border-b-2 ${
                 activeTab === tab.id 
-                ? 'border-[#FDB913] text-black font-extrabold bg-gray-50' 
-                : 'border-transparent text-gray-500 hover:text-black hover:bg-gray-50'
+                ? 'border-[#FDB913] text-black font-black bg-gray-50' 
+                : 'border-transparent text-gray-400 hover:text-black hover:bg-gray-50'
               }`}
             >
               {tab.icon}
-              <span className="text-sm uppercase tracking-wider">{tab.name}</span>
+              <span className="text-xs uppercase tracking-widest font-bold">{tab.name}</span>
             </button>
           ))}
         </div>
       </nav>
 
-      {/* Main Content Area */}
+      {/* Content */}
       <main className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
         {activeTab === 'calendar' && (
           <CalendarView 
@@ -325,18 +359,19 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Footer / Status Bar */}
-      <footer className="bg-white border-t border-gray-200 py-3 px-8 flex justify-between items-center text-[10px] text-gray-400 font-medium uppercase tracking-widest">
-        <div className="flex items-center space-x-4">
+      {/* Status Bar */}
+      <footer className="bg-white border-t border-gray-200 py-2 px-8 flex justify-between items-center text-[9px] text-gray-400 font-bold uppercase tracking-widest">
+        <div className="flex items-center space-x-6">
           <span>© {new Date().getFullYear()} EPIROC ROCKDRILL AB</span>
-          <span className={isConnected ? "text-green-500 font-bold" : "text-gray-300"}>
-            ● {isConnected ? 'TEAM CLOUD SYNC: ONLINE' : 'LOCAL CACHE: ACTIVE'}
-          </span>
-          {lastSyncTime && <span className="text-gray-300">Last Sync Check: {lastSyncTime.toLocaleTimeString()}</span>}
+          <div className="flex items-center space-x-1">
+             <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+             <span>SYSTEM STATUS: {isConnected ? 'OPERATIONAL' : 'OFFLINE'}</span>
+          </div>
         </div>
-        <div className="flex items-center space-x-2">
-           <span className={isConnected ? "text-green-500" : "text-gray-400"}>NETWORK: {isConnected ? 'LIVE' : 'DISCONNECTED'}</span>
-           <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`}></span>
+        <div className="flex items-center space-x-4">
+           {lastSyncTime && <span>LAST SYNC: {lastSyncTime.toLocaleTimeString()}</span>}
+           <span className="text-black/20">|</span>
+           <span>VERSION 2.1.4</span>
         </div>
       </footer>
     </div>
