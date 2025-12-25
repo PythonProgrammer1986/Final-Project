@@ -13,10 +13,11 @@ import {
   RefreshCw, 
   Bell, 
   Cloud,
-  CloudOff,
   Wifi,
   WifiOff,
-  ShieldAlert
+  ShieldAlert,
+  FileJson,
+  Share2
 } from 'lucide-react';
 import { AppState, Task, Project, Activity, KPI, SafetyStatus } from './types';
 import { BRAND, DEFAULT_USERS, DEFAULT_CATEGORIES, DEFAULT_AGENDA } from './constants';
@@ -30,8 +31,8 @@ import Masters from './components/Masters';
 
 const STORAGE_KEY = 'epiroc_management_data';
 const SYNC_KEY_STORAGE = 'epiroc_sync_id';
-// Switched to a more robust provider that returns ID in JSON body
-const SYNC_API_BASE = 'https://api.jsonstorage.net/v1/json';
+// Npoint is often more reliable in corporate environments
+const SYNC_API_BASE = 'https://api.npoint.io';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('calendar');
@@ -54,51 +55,48 @@ const App: React.FC = () => {
     };
   });
 
-  const [notifications, setNotifications] = useState<string[]>([]);
   const isUpdatingRef = useRef(false);
-  const lastCloudHashRef = useRef<string>('');
 
-  // Primary Sync Function (Optimized for Corporate Firewalls)
+  // SMART MERGE LOGIC: Combines local and remote data without deleting unique items
+  const mergeData = (local: AppState, remote: AppState): AppState => {
+    const mergeById = (a: any[], b: any[]) => {
+      const map = new Map();
+      [...a, ...b].forEach(item => map.set(item.id, { ...(map.get(item.id) || {}), ...item }));
+      return Array.from(map.values());
+    };
+
+    return {
+      ...remote, // Take global settings from remote
+      tasks: mergeById(local.tasks, remote.tasks),
+      projects: mergeById(local.projects, remote.projects),
+      activities: mergeById(local.activities, remote.activities),
+      kpis: mergeById(local.kpis, remote.kpis),
+      safetyStatus: { ...local.safetyStatus, ...remote.safetyStatus }
+    };
+  };
+
   const syncWithCloud = useCallback(async (direction: 'push' | 'pull', stateToPush?: AppState) => {
-    if (!syncId) {
-      setIsConnected(false);
-      return;
-    }
-    
+    if (!syncId) return;
     setIsSyncing(true);
-    // JSONStorage URL format: BASE/ID
     const url = `${SYNC_API_BASE}/${syncId}`;
 
     try {
       if (direction === 'push' && stateToPush) {
-        const currentHash = JSON.stringify(stateToPush);
-        if (currentHash === lastCloudHashRef.current) {
-          setIsSyncing(false);
-          return;
-        }
-
         const res = await fetch(url, {
-          method: 'PUT',
+          method: 'POST', // Npoint uses POST to update
           headers: { 'Content-Type': 'application/json' },
-          body: currentHash
+          body: JSON.stringify(stateToPush)
         });
-        
-        if (res.ok) {
-          lastCloudHashRef.current = currentHash;
-          setIsConnected(true);
-        } else {
-          setIsConnected(false);
-        }
+        if (res.ok) setIsConnected(true);
       } else {
         const response = await fetch(url);
         if (response.ok) {
           const cloudData = await response.json();
-          const cloudHash = JSON.stringify(cloudData);
-          
-          if (cloudHash !== JSON.stringify(data)) {
+          // Only update if data is actually different
+          if (JSON.stringify(cloudData) !== JSON.stringify(data)) {
             isUpdatingRef.current = true;
-            setData(cloudData);
-            lastCloudHashRef.current = cloudHash;
+            const merged = mergeData(data, cloudData);
+            setData(merged);
             setTimeout(() => { isUpdatingRef.current = false; }, 500);
           }
           setIsConnected(true);
@@ -108,31 +106,26 @@ const App: React.FC = () => {
       }
       setLastSyncTime(new Date());
     } catch (error) {
-      console.error("Cloud Sync Error:", error);
       setIsConnected(false);
     } finally {
       setIsSyncing(false);
     }
   }, [syncId, data]);
 
-  // Sync Logic Setup
+  // Periodic Refresh (2 minutes to reduce network load)
   useEffect(() => {
     if (syncId) {
       syncWithCloud('pull');
-      const interval = setInterval(() => syncWithCloud('pull'), 25000); // 25s polling
+      const interval = setInterval(() => syncWithCloud('pull'), 120000);
       return () => clearInterval(interval);
     }
   }, [syncId, syncWithCloud]);
 
+  // Save to LocalStorage immediately
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    if (syncId && !isUpdatingRef.current) {
-      const timer = setTimeout(() => syncWithCloud('push', data), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [data, syncId, syncWithCloud]);
+  }, [data]);
 
-  // Master Connection Logic (Fixed for reliability)
   const updateSyncId = async (id: string, isNew: boolean = false) => {
     if (!id && !isNew) {
       setSyncId('');
@@ -144,46 +137,34 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       if (isNew) {
-        // Create new storage item
-        const createRes = await fetch(SYNC_API_BASE, {
+        const res = await fetch(SYNC_API_BASE, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
-
-        if (createRes.ok) {
-          const result = await createRes.json();
-          // JSONStorage returns a URI: "https://.../ID"
-          const parts = result.uri.split('/');
-          const newId = parts[parts.length - 1];
-          
-          if (newId) {
-            setSyncId(newId);
-            localStorage.setItem(SYNC_KEY_STORAGE, newId);
-            setIsConnected(true);
-            alert(`TEAM SYNC ACTIVATED\n\nYour Team Key: ${newId}\n\nShare this key with your team members.`);
-          }
-        } else {
-          throw new Error(`Server returned error ${createRes.status}`);
+        if (res.ok) {
+          const result = await res.json();
+          const newId = result.id;
+          setSyncId(newId);
+          localStorage.setItem(SYNC_KEY_STORAGE, newId);
+          setIsConnected(true);
+          alert(`DATABASE CREATED!\nKey: ${newId}\nShare this with your team.`);
         }
       } else {
-        // Join existing
-        const trimmedId = id.trim();
-        const res = await fetch(`${SYNC_API_BASE}/${trimmedId}`);
+        const res = await fetch(`${SYNC_API_BASE}/${id}`);
         if (res.ok) {
           const cloudData = await res.json();
-          setData(cloudData);
-          setSyncId(trimmedId);
-          localStorage.setItem(SYNC_KEY_STORAGE, trimmedId);
+          setData(mergeData(data, cloudData));
+          setSyncId(id);
+          localStorage.setItem(SYNC_KEY_STORAGE, id);
           setIsConnected(true);
-          alert('CONNECTED: Team database loaded.');
+          alert('TEAM CONNECTED!');
         } else {
-          alert('ID NOT FOUND: Please check the Team Key and try again.');
+          alert('INVALID KEY: Check the ID and try again.');
         }
       }
-    } catch (e: any) {
-      console.error(e);
-      alert(`SYNC ERROR: Connection Failed.\n\nNote: If you are on a corporate network, IT may be blocking 'api.jsonstorage.net'.\n\nDetails: ${e.message}`);
+    } catch (e) {
+      alert('NETWORK BLOCKED: Your corporate firewall is preventing cloud sync.\n\nPlease use the "SHARED FOLDER SYNC" method in the Masters tab.');
       setIsConnected(false);
     } finally {
       setIsSyncing(false);
@@ -194,64 +175,87 @@ const App: React.FC = () => {
     setData(prev => ({ ...prev, ...newData }));
   };
 
+  // Shared Drive Helper Functions
+  const exportToSharedDrive = () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `epiroc_team_sync_${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    alert("FILE EXPORTED.\n\nPlease save this file to your Shared Network Folder (e.g., Z:\\ProjectData\\).");
+  };
+
+  const importFromSharedDrive = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const importedData = JSON.parse(e.target?.result as string);
+        const merged = mergeData(data, importedData);
+        setData(merged);
+        alert("SYNC COMPLETE: Team data merged from shared file.");
+      } catch (err) {
+        alert("ERROR: Invalid file format.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const tabs = [
-    { id: 'calendar', name: 'Calendar', icon: <Calendar size={20} /> },
-    { id: 'tasks', name: 'Tasks', icon: <CheckSquare size={20} /> },
-    { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={20} /> },
-    { id: 'projects', name: 'Projects', icon: <Target size={20} /> },
-    { id: 'activities', name: 'Activities', icon: <Clock size={20} /> },
-    { id: 'kpis', name: 'KPI Tracker', icon: <TrendingUp size={20} /> },
-    { id: 'masters', name: 'Masters', icon: <Settings size={20} /> },
+    { id: 'calendar', name: 'Calendar', icon: <Calendar size={18} /> },
+    { id: 'tasks', name: 'Tasks', icon: <CheckSquare size={18} /> },
+    { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+    { id: 'projects', name: 'Projects', icon: <Target size={18} /> },
+    { id: 'activities', name: 'Activities', icon: <Clock size={18} /> },
+    { id: 'kpis', name: 'KPI Tracker', icon: <TrendingUp size={18} /> },
+    { id: 'masters', name: 'Masters', icon: <Settings size={18} /> },
   ];
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8F9FA]">
-      {!syncId && (
-        <div className="bg-[#FDB913] text-black text-[11px] font-black py-2.5 px-8 flex justify-between items-center z-50 shadow-md">
-           <div className="flex items-center space-x-2">
-             <ShieldAlert size={14} />
-             <span>TEAM COLLABORATION IS CURRENTLY DISABLED. DATA IS ONLY LOCAL.</span>
-           </div>
-           <button onClick={() => setActiveTab('masters')} className="bg-black text-white px-4 py-1 rounded text-[9px] hover:bg-zinc-800 transition">SETUP TEAM CLOUD SYNC →</button>
-        </div>
-      )}
-
-      <header className="bg-black text-white h-24 flex items-center px-8 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-1/3 h-full bg-[#FDB913] skew-x-[-20deg] translate-x-20 z-0 opacity-90"></div>
+      {/* Dynamic Status Header */}
+      <div className={`${isConnected ? 'bg-black' : 'bg-[#FDB913]'} text-white transition-colors h-24 flex items-center px-8 relative overflow-hidden border-b-2 border-white/10`}>
+        <div className="absolute top-0 right-0 w-1/3 h-full bg-white/5 skew-x-[-20deg] translate-x-20 z-0"></div>
         <div className="flex items-center z-10 space-x-6">
           <div className="bg-[#FDB913] w-14 h-14 flex items-center justify-center font-black text-3xl text-black rounded-sm border-2 border-black/10">E</div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight uppercase leading-none mb-1">Epiroc Rockdrill</h1>
-            <div className="flex items-center space-x-2 text-[10px] opacity-70 uppercase tracking-widest font-bold">
-              <span>Management v2.5</span>
-              <span className="text-[#FDB913]">•</span>
-              {isConnected ? (
-                <span className="flex items-center text-green-400"><Wifi size={10} className="mr-1" /> CLOUD ONLINE</span>
-              ) : (
-                <span className="flex items-center text-red-500"><WifiOff size={10} className="mr-1" /> OFFLINE</span>
-              )}
+            <h1 className={`text-2xl font-black tracking-tight uppercase ${isConnected ? 'text-white' : 'text-black'}`}>Epiroc Rockdrill</h1>
+            <div className={`flex items-center space-x-3 text-[10px] uppercase tracking-widest font-bold ${isConnected ? 'text-gray-400' : 'text-black/60'}`}>
+              <span className="flex items-center">
+                {isConnected ? <Wifi size={10} className="mr-1 text-green-400" /> : <WifiOff size={10} className="mr-1" />}
+                {isConnected ? 'TEAM CLOUD ACTIVE' : 'LOCAL MODE / SHARED DRIVE'}
+              </span>
+              <span>•</span>
+              <span className="flex items-center">
+                <FileJson size={10} className="mr-1" />
+                ID: {syncId || 'UNLINKED'}
+              </span>
             </div>
           </div>
         </div>
         
         <div className="flex-1"></div>
 
-        <div className="flex items-center space-x-6 z-10">
-           {isSyncing && (
-             <div className="flex items-center space-x-2 text-[#FDB913] text-[9px] font-black uppercase tracking-tighter">
-               <RefreshCw size={12} className="animate-spin" />
-               <span>Syncing...</span>
-             </div>
-           )}
-           <div className="flex flex-col items-end">
-             <span className="text-[9px] text-gray-500 uppercase font-black">Session ID</span>
-             <span className="text-[#FDB913] text-xs font-mono font-bold tracking-widest">{syncId || 'NONE'}</span>
-           </div>
+        <div className="flex items-center space-x-4 z-10">
+           <button 
+             onClick={exportToSharedDrive}
+             className="flex items-center space-x-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded text-[10px] font-black uppercase transition border border-white/5"
+           >
+             <Share2 size={14} className="text-[#FDB913]" />
+             <span>Export to Shared Drive</span>
+           </button>
+           <label className="flex items-center space-x-2 bg-[#FDB913] hover:brightness-110 px-4 py-2 rounded text-[10px] font-black uppercase text-black cursor-pointer transition shadow-lg">
+             <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />
+             <span>Sync from Shared File</span>
+             <input type="file" className="hidden" accept=".json" onChange={importFromSharedDrive} />
+           </label>
         </div>
-      </header>
+      </div>
 
-      <nav className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
-        <div className="max-w-7xl mx-auto flex">
+      <nav className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm overflow-x-auto">
+        <div className="max-w-7xl mx-auto flex min-w-max">
           {tabs.map(tab => (
             <button
               key={tab.id}
@@ -263,7 +267,7 @@ const App: React.FC = () => {
               }`}
             >
               {tab.icon}
-              <span className="text-xs uppercase tracking-[0.15em] font-black">{tab.name}</span>
+              <span className="text-[11px] uppercase tracking-[0.15em] font-black">{tab.name}</span>
             </button>
           ))}
         </div>
@@ -282,12 +286,12 @@ const App: React.FC = () => {
       <footer className="bg-white border-t border-gray-200 py-3 px-8 flex justify-between items-center text-[9px] text-gray-400 font-bold uppercase tracking-widest">
         <div className="flex items-center space-x-6">
           <span>© {new Date().getFullYear()} EPIROC ROCKDRILL AB</span>
-          <span className={isConnected ? "text-green-500" : "text-gray-300"}>● STATUS: {isConnected ? 'SYNC ACTIVE' : 'LOCAL MODE'}</span>
+          <span className={isConnected ? "text-green-500" : "text-gray-300"}>● SYSTEM: {isConnected ? 'CONNECTED' : 'STANDALONE (SHARED FOLDER SYNC)'}</span>
         </div>
         <div className="flex items-center space-x-4">
-           {lastSyncTime && <span>LAST SUCCESSFUL SYNC: {lastSyncTime.toLocaleTimeString()}</span>}
+           {lastSyncTime && <span>LAST SYNC: {lastSyncTime.toLocaleTimeString()}</span>}
            <span className="text-black/10">|</span>
-           <span>MULTI-USER CLOUD v2.5.1</span>
+           <span>ENTERPRISE RELEASE v3.0.0</span>
         </div>
       </footer>
     </div>
