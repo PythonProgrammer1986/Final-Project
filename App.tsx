@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Calendar, 
   CheckSquare, 
@@ -13,7 +13,9 @@ import {
   RefreshCw, 
   Bell, 
   BrainCircuit,
-  FileDown
+  Cloud,
+  CloudOff,
+  Users as UsersIcon
 } from 'lucide-react';
 import { AppState, Task, Project, Activity, KPI, SafetyStatus } from './types';
 import { BRAND, DEFAULT_USERS, DEFAULT_CATEGORIES, DEFAULT_AGENDA } from './constants';
@@ -26,9 +28,13 @@ import KPITracker from './components/KPITracker';
 import Masters from './components/Masters';
 
 const STORAGE_KEY = 'epiroc_management_data';
+const SYNC_KEY_STORAGE = 'epiroc_sync_id';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('calendar');
+  const [syncId, setSyncId] = useState<string>(localStorage.getItem(SYNC_KEY_STORAGE) || '');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [data, setData] = useState<AppState>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) return JSON.parse(saved);
@@ -45,21 +51,112 @@ const App: React.FC = () => {
   });
 
   const [notifications, setNotifications] = useState<string[]>([]);
+  const isUpdatingRef = useRef(false);
 
-  // Persist data
+  // Cloud Sync Logic
+  const syncWithCloud = useCallback(async (direction: 'push' | 'pull', stateToPush?: AppState) => {
+    if (!syncId) return;
+    setIsSyncing(true);
+    
+    // Using a public anonymous storage API for the demo sync
+    // In a real production environment, use Supabase or Firebase
+    const url = `https://jsonblob.com/api/jsonBlob/${syncId}`;
+
+    try {
+      if (direction === 'push' && stateToPush) {
+        await fetch(url, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(stateToPush)
+        });
+      } else {
+        const response = await fetch(url);
+        if (response.ok) {
+          const cloudData = await response.json();
+          // Simple check: Only update if cloud data is different
+          if (JSON.stringify(cloudData) !== JSON.stringify(data)) {
+            isUpdatingRef.current = true;
+            setData(cloudData);
+            setTimeout(() => { isUpdatingRef.current = false; }, 500);
+          }
+        }
+      }
+      setLastSyncTime(new Date());
+    } catch (error) {
+      console.error("Sync Error:", error);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [syncId, data]);
+
+  // Handle Local Data Changes
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [data]);
+    
+    // Auto-push to cloud if sync is enabled and change was local
+    if (syncId && !isUpdatingRef.current) {
+      const timer = setTimeout(() => {
+        syncWithCloud('push', data);
+      }, 1000); // Debounce push
+      return () => clearTimeout(timer);
+    }
+  }, [data, syncId, syncWithCloud]);
 
-  // Automated checks (Simulated reminders)
+  // Background Pull
+  useEffect(() => {
+    if (!syncId) return;
+    
+    // Pull every 30 seconds
+    const interval = setInterval(() => {
+      syncWithCloud('pull');
+    }, 30000);
+    
+    return () => clearInterval(interval);
+  }, [syncId, syncWithCloud]);
+
+  // Setup Sync ID
+  const updateSyncId = async (id: string) => {
+    if (!id) {
+      setSyncId('');
+      localStorage.removeItem(SYNC_KEY_STORAGE);
+      return;
+    }
+
+    // If it's a new ID, try to fetch or create
+    setIsSyncing(true);
+    try {
+      // Check if blob exists
+      const res = await fetch(`https://jsonblob.com/api/jsonBlob/${id}`);
+      if (res.ok) {
+        const cloudData = await res.json();
+        setData(cloudData);
+      } else {
+        // Create it with current data
+        await fetch('https://jsonblob.com/api/jsonBlob', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Location': id },
+          body: JSON.stringify(data)
+        });
+      }
+      setSyncId(id);
+      localStorage.setItem(SYNC_KEY_STORAGE, id);
+      alert('Joined Shared Session Successfully!');
+    } catch (e) {
+      alert('Could not connect to sync service.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Automated checks
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     const overdue = data.tasks.filter(t => t.dueDate < today && t.status !== 'Completed').length;
     const dueToday = data.tasks.filter(t => t.dueDate === today && t.status !== 'Completed').length;
     
     const newNotifications = [];
-    if (overdue > 0) newNotifications.push(`⚠️ ${overdue} Overdue tasks need attention.`);
-    if (dueToday > 0) newNotifications.push(`📅 ${dueToday} tasks are due today.`);
+    if (overdue > 0) newNotifications.push(`⚠️ ${overdue} Overdue tasks.`);
+    if (dueToday > 0) newNotifications.push(`📅 ${dueToday} due today.`);
     setNotifications(newNotifications);
   }, [data.tasks]);
 
@@ -114,18 +211,36 @@ const App: React.FC = () => {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">EPIROC ROCKDRILL AB</h1>
-            <p className="text-sm opacity-80 uppercase tracking-widest font-medium">Complete Management System • Ultimate Edition</p>
+            <div className="flex items-center space-x-2 text-[10px] opacity-80 uppercase tracking-widest font-medium">
+              <span>Complete Management System</span>
+              <span className="text-[#FDB913]">•</span>
+              {syncId ? (
+                <span className="flex items-center text-green-400">
+                  <Cloud size={10} className="mr-1" /> Multi-User Shared Session Active
+                </span>
+              ) : (
+                <span className="flex items-center text-gray-400">
+                  <CloudOff size={10} className="mr-1" /> Standalone Local Mode
+                </span>
+              )}
+            </div>
           </div>
         </div>
         
         <div className="flex-1"></div>
 
         <div className="flex items-center space-x-4 z-10 text-black font-semibold">
-           <button onClick={handleExport} className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded hover:bg-gray-100 transition shadow-sm text-sm">
-             <Download size={16} /> <span>Export</span>
+           {isSyncing && (
+             <div className="flex items-center space-x-2 text-white text-[10px] mr-4 animate-pulse">
+               <RefreshCw size={12} className="animate-spin text-[#FDB913]" />
+               <span>SYNCING CLOUD...</span>
+             </div>
+           )}
+           <button onClick={handleExport} className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded hover:bg-gray-100 transition shadow-sm text-xs">
+             <Download size={14} /> <span>Export</span>
            </button>
-           <label className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded hover:bg-gray-100 cursor-pointer transition shadow-sm text-sm">
-             <Upload size={16} /> <span>Import</span>
+           <label className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded hover:bg-gray-100 cursor-pointer transition shadow-sm text-xs">
+             <Upload size={14} /> <span>Import</span>
              <input type="file" className="hidden" onChange={handleImport} />
            </label>
            <div className="relative group">
@@ -205,6 +320,8 @@ const App: React.FC = () => {
           <Masters 
             users={data.users} 
             categories={data.categories} 
+            syncId={syncId}
+            updateSyncId={updateSyncId}
             updateUsers={(users) => updateData({ users })} 
             updateCategories={(categories) => updateData({ categories })} 
           />
@@ -215,12 +332,12 @@ const App: React.FC = () => {
       <footer className="bg-white border-t border-gray-200 py-3 px-8 flex justify-between items-center text-[10px] text-gray-400 font-medium uppercase tracking-widest">
         <div className="flex items-center space-x-4">
           <span>© {new Date().getFullYear()} EPIROC ROCKDRILL AB</span>
-          <span className="text-[#FDB913]">● AUTO-SAVE ACTIVE</span>
-          <span className="flex items-center"><BrainCircuit size={10} className="mr-1" /> AI ANALYTICS READY</span>
+          <span className="text-[#FDB913]">● {syncId ? 'CLOUD SYNC ACTIVE' : 'LOCAL CACHE ACTIVE'}</span>
+          {lastSyncTime && <span className="text-gray-300">Last Sync: {lastSyncTime.toLocaleTimeString()}</span>}
         </div>
         <div className="flex items-center space-x-2">
-           <span>DB STATUS: CONNECTED</span>
-           <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+           <span className={syncId ? "text-green-500" : "text-gray-400"}>NETWORK: {syncId ? 'CONNECTED' : 'DISCONNECTED'}</span>
+           <span className={`w-1.5 h-1.5 rounded-full ${syncId ? 'bg-green-500' : 'bg-gray-300'}`}></span>
         </div>
       </footer>
     </div>
