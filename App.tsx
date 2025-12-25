@@ -30,7 +30,8 @@ import Masters from './components/Masters';
 
 const STORAGE_KEY = 'epiroc_management_data';
 const SYNC_KEY_STORAGE = 'epiroc_sync_id';
-const SYNC_API_BASE = 'https://jsonblob.com/api/jsonBlob';
+// Switched to a more robust provider that returns ID in JSON body
+const SYNC_API_BASE = 'https://api.jsonstorage.net/v1/json';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('calendar');
@@ -57,7 +58,7 @@ const App: React.FC = () => {
   const isUpdatingRef = useRef(false);
   const lastCloudHashRef = useRef<string>('');
 
-  // Primary Sync Function
+  // Primary Sync Function (Optimized for Corporate Firewalls)
   const syncWithCloud = useCallback(async (direction: 'push' | 'pull', stateToPush?: AppState) => {
     if (!syncId) {
       setIsConnected(false);
@@ -65,28 +66,21 @@ const App: React.FC = () => {
     }
     
     setIsSyncing(true);
+    // JSONStorage URL format: BASE/ID
     const url = `${SYNC_API_BASE}/${syncId}`;
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
-
       if (direction === 'push' && stateToPush) {
         const currentHash = JSON.stringify(stateToPush);
         if (currentHash === lastCloudHashRef.current) {
           setIsSyncing(false);
-          clearTimeout(timeoutId);
           return;
         }
 
         const res = await fetch(url, {
           method: 'PUT',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: currentHash,
-          signal: controller.signal
+          headers: { 'Content-Type': 'application/json' },
+          body: currentHash
         });
         
         if (res.ok) {
@@ -96,11 +90,7 @@ const App: React.FC = () => {
           setIsConnected(false);
         }
       } else {
-        const response = await fetch(url, { 
-          headers: { 'Accept': 'application/json' },
-          signal: controller.signal 
-        });
-        
+        const response = await fetch(url);
         if (response.ok) {
           const cloudData = await response.json();
           const cloudHash = JSON.stringify(cloudData);
@@ -117,7 +107,6 @@ const App: React.FC = () => {
         }
       }
       setLastSyncTime(new Date());
-      clearTimeout(timeoutId);
     } catch (error) {
       console.error("Cloud Sync Error:", error);
       setIsConnected(false);
@@ -126,28 +115,24 @@ const App: React.FC = () => {
     }
   }, [syncId, data]);
 
-  // Periodic Pulling
+  // Sync Logic Setup
   useEffect(() => {
     if (syncId) {
       syncWithCloud('pull');
-      const interval = setInterval(() => syncWithCloud('pull'), 20000);
+      const interval = setInterval(() => syncWithCloud('pull'), 25000); // 25s polling
       return () => clearInterval(interval);
     }
   }, [syncId, syncWithCloud]);
 
-  // Save Local & Push Changes
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    
     if (syncId && !isUpdatingRef.current) {
-      const timer = setTimeout(() => {
-        syncWithCloud('push', data);
-      }, 2000);
+      const timer = setTimeout(() => syncWithCloud('push', data), 3000);
       return () => clearTimeout(timer);
     }
   }, [data, syncId, syncWithCloud]);
 
-  // Masters Tab Connection Management
+  // Master Connection Logic (Fixed for reliability)
   const updateSyncId = async (id: string, isNew: boolean = false) => {
     if (!id && !isNew) {
       setSyncId('');
@@ -159,52 +144,46 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       if (isNew) {
-        // Step 1: Create fresh blob on server
+        // Create new storage item
         const createRes = await fetch(SYNC_API_BASE, {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
 
         if (createRes.ok) {
-          const location = createRes.headers.get('Location');
-          const newId = location ? location.split('/').pop() : null;
+          const result = await createRes.json();
+          // JSONStorage returns a URI: "https://.../ID"
+          const parts = result.uri.split('/');
+          const newId = parts[parts.length - 1];
           
           if (newId) {
             setSyncId(newId);
             localStorage.setItem(SYNC_KEY_STORAGE, newId);
             setIsConnected(true);
-            alert(`SUCCESS: New Team Database Created!\n\nYour Team Key is: ${newId}\n\nShare this key with your team members.`);
-          } else {
-            throw new Error("Could not parse ID from server.");
+            alert(`TEAM SYNC ACTIVATED\n\nYour Team Key: ${newId}\n\nShare this key with your team members.`);
           }
         } else {
-          throw new Error(`Server returned ${createRes.status}`);
+          throw new Error(`Server returned error ${createRes.status}`);
         }
       } else {
-        // Step 2: Join existing
+        // Join existing
         const trimmedId = id.trim();
-        const res = await fetch(`${SYNC_API_BASE}/${trimmedId}`, {
-          headers: { 'Accept': 'application/json' }
-        });
-        
+        const res = await fetch(`${SYNC_API_BASE}/${trimmedId}`);
         if (res.ok) {
           const cloudData = await res.json();
           setData(cloudData);
           setSyncId(trimmedId);
           localStorage.setItem(SYNC_KEY_STORAGE, trimmedId);
           setIsConnected(true);
-          alert('SUCCESS: Connected to Team Database!');
+          alert('CONNECTED: Team database loaded.');
         } else {
-          alert(`ERROR: Could not find a team database with ID: ${trimmedId}\n\nPlease check the key and try again.`);
+          alert('ID NOT FOUND: Please check the Team Key and try again.');
         }
       }
     } catch (e: any) {
       console.error(e);
-      alert(`NETWORK ERROR: Could not reach sync servers.\n\nPossible reasons:\n1. Corporate firewall is blocking jsonblob.com\n2. No internet connection\n3. The sync service is temporarily down.\n\nError details: ${e.message}`);
+      alert(`SYNC ERROR: Connection Failed.\n\nNote: If you are on a corporate network, IT may be blocking 'api.jsonstorage.net'.\n\nDetails: ${e.message}`);
       setIsConnected(false);
     } finally {
       setIsSyncing(false);
@@ -227,41 +206,29 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8F9FA]">
-      {/* Critical Sync Alert */}
       {!syncId && (
-        <div className="bg-[#FDB913] text-black text-[11px] font-extrabold py-2 px-8 flex justify-between items-center shadow-lg border-b border-black/10 z-50">
+        <div className="bg-[#FDB913] text-black text-[11px] font-black py-2.5 px-8 flex justify-between items-center z-50 shadow-md">
            <div className="flex items-center space-x-2">
-             <ShieldAlert size={14} className="animate-pulse" />
-             <span>ACTION REQUIRED: TEAM DATA SHARING IS DISABLED. GO TO 'MASTERS' TO CONNECT YOUR TEAM.</span>
+             <ShieldAlert size={14} />
+             <span>TEAM COLLABORATION IS CURRENTLY DISABLED. DATA IS ONLY LOCAL.</span>
            </div>
-           <button onClick={() => setActiveTab('masters')} className="bg-black text-white px-3 py-1 rounded-sm text-[9px] hover:bg-zinc-800 transition">SETUP NOW →</button>
+           <button onClick={() => setActiveTab('masters')} className="bg-black text-white px-4 py-1 rounded text-[9px] hover:bg-zinc-800 transition">SETUP TEAM CLOUD SYNC →</button>
         </div>
       )}
 
-      {/* Header */}
       <header className="bg-black text-white h-24 flex items-center px-8 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-1/3 h-full bg-[#FDB913] skew-x-[-20deg] translate-x-20 z-0"></div>
+        <div className="absolute top-0 right-0 w-1/3 h-full bg-[#FDB913] skew-x-[-20deg] translate-x-20 z-0 opacity-90"></div>
         <div className="flex items-center z-10 space-x-6">
-          <div className="bg-[#FDB913] w-14 h-14 flex items-center justify-center font-bold text-3xl text-black rounded-sm shadow-lg border-2 border-black/20">
-            E
-          </div>
+          <div className="bg-[#FDB913] w-14 h-14 flex items-center justify-center font-black text-3xl text-black rounded-sm border-2 border-black/10">E</div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight uppercase">Epiroc Rockdrill</h1>
-            <div className="flex items-center space-x-2 text-[10px] opacity-80 uppercase tracking-widest font-bold">
-              <span>Management System</span>
+            <h1 className="text-2xl font-black tracking-tight uppercase leading-none mb-1">Epiroc Rockdrill</h1>
+            <div className="flex items-center space-x-2 text-[10px] opacity-70 uppercase tracking-widest font-bold">
+              <span>Management v2.5</span>
               <span className="text-[#FDB913]">•</span>
               {isConnected ? (
-                <span className="flex items-center text-green-400">
-                  <Wifi size={10} className="mr-1" /> CLOUD: CONNECTED
-                </span>
-              ) : syncId ? (
-                <span className="flex items-center text-red-500">
-                  <WifiOff size={10} className="mr-1 animate-pulse" /> CLOUD: DISCONNECTED
-                </span>
+                <span className="flex items-center text-green-400"><Wifi size={10} className="mr-1" /> CLOUD ONLINE</span>
               ) : (
-                <span className="flex items-center text-gray-400">
-                   MODE: LOCAL ONLY
-                </span>
+                <span className="flex items-center text-red-500"><WifiOff size={10} className="mr-1" /> OFFLINE</span>
               )}
             </div>
           </div>
@@ -269,109 +236,58 @@ const App: React.FC = () => {
         
         <div className="flex-1"></div>
 
-        <div className="flex items-center space-x-4 z-10">
+        <div className="flex items-center space-x-6 z-10">
            {isSyncing && (
-             <div className="flex items-center space-x-2 text-[#FDB913] text-[9px] font-black mr-4 uppercase">
+             <div className="flex items-center space-x-2 text-[#FDB913] text-[9px] font-black uppercase tracking-tighter">
                <RefreshCw size={12} className="animate-spin" />
                <span>Syncing...</span>
              </div>
            )}
-           <div className="flex flex-col items-end pr-4 border-r border-white/10 mr-4">
-             <span className="text-[9px] text-gray-500 uppercase font-black">Active Session</span>
-             <span className="text-[#FDB913] text-xs font-mono font-bold tracking-widest">
-               {syncId ? syncId : 'NONE'}
-             </span>
-           </div>
-           <div className="p-2 bg-white/10 rounded-full border border-white/5">
-             <Bell size={18} className={notifications.length > 0 ? "text-[#FDB913]" : "text-gray-500"} />
+           <div className="flex flex-col items-end">
+             <span className="text-[9px] text-gray-500 uppercase font-black">Session ID</span>
+             <span className="text-[#FDB913] text-xs font-mono font-bold tracking-widest">{syncId || 'NONE'}</span>
            </div>
         </div>
       </header>
 
-      {/* Tabs */}
       <nav className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
         <div className="max-w-7xl mx-auto flex">
           {tabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center space-x-2 px-6 py-4 transition-all border-b-2 ${
+              className={`flex items-center space-x-3 px-8 py-5 transition-all border-b-4 ${
                 activeTab === tab.id 
                 ? 'border-[#FDB913] text-black font-black bg-gray-50' 
                 : 'border-transparent text-gray-400 hover:text-black hover:bg-gray-50'
               }`}
             >
               {tab.icon}
-              <span className="text-xs uppercase tracking-widest font-bold">{tab.name}</span>
+              <span className="text-xs uppercase tracking-[0.15em] font-black">{tab.name}</span>
             </button>
           ))}
         </div>
       </nav>
 
-      {/* Content */}
       <main className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
-        {activeTab === 'calendar' && (
-          <CalendarView 
-            tasks={data.tasks} 
-            safetyStatus={data.safetyStatus} 
-            updateSafetyStatus={(newStatus) => updateData({ safetyStatus: newStatus })} 
-          />
-        )}
-        {activeTab === 'tasks' && (
-          <TaskBoard 
-            tasks={data.tasks} 
-            users={data.users} 
-            categories={data.categories} 
-            projects={data.projects}
-            updateTasks={(tasks) => updateData({ tasks })} 
-          />
-        )}
+        {activeTab === 'calendar' && <CalendarView tasks={data.tasks} safetyStatus={data.safetyStatus} updateSafetyStatus={(newStatus) => updateData({ safetyStatus: newStatus })} />}
+        {activeTab === 'tasks' && <TaskBoard tasks={data.tasks} users={data.users} categories={data.categories} projects={data.projects} updateTasks={(tasks) => updateData({ tasks })} />}
         {activeTab === 'dashboard' && <Dashboard state={data} />}
-        {activeTab === 'projects' && (
-          <ProjectBoard 
-            projects={data.projects} 
-            users={data.users} 
-            updateProjects={(projects) => updateData({ projects })} 
-          />
-        )}
-        {activeTab === 'activities' && (
-          <ActivityTracker 
-            activities={data.activities} 
-            users={data.users} 
-            updateActivities={(activities) => updateData({ activities })} 
-          />
-        )}
-        {activeTab === 'kpis' && (
-          <KPITracker 
-            kpis={data.kpis} 
-            updateKpis={(kpis) => updateData({ kpis })} 
-          />
-        )}
-        {activeTab === 'masters' && (
-          <Masters 
-            users={data.users} 
-            categories={data.categories} 
-            syncId={syncId}
-            updateSyncId={updateSyncId}
-            updateUsers={(users) => updateData({ users })} 
-            updateCategories={(categories) => updateData({ categories })} 
-          />
-        )}
+        {activeTab === 'projects' && <ProjectBoard projects={data.projects} users={data.users} updateProjects={(projects) => updateData({ projects })} />}
+        {activeTab === 'activities' && <ActivityTracker activities={data.activities} users={data.users} updateActivities={(activities) => updateData({ activities })} />}
+        {activeTab === 'kpis' && <KPITracker kpis={data.kpis} updateKpis={(kpis) => updateData({ kpis })} />}
+        {activeTab === 'masters' && <Masters users={data.users} categories={data.categories} syncId={syncId} updateSyncId={updateSyncId} updateUsers={(users) => updateData({ users })} updateCategories={(categories) => updateData({ categories })} />}
       </main>
 
-      {/* Status Bar */}
-      <footer className="bg-white border-t border-gray-200 py-2 px-8 flex justify-between items-center text-[9px] text-gray-400 font-bold uppercase tracking-widest">
+      <footer className="bg-white border-t border-gray-200 py-3 px-8 flex justify-between items-center text-[9px] text-gray-400 font-bold uppercase tracking-widest">
         <div className="flex items-center space-x-6">
           <span>© {new Date().getFullYear()} EPIROC ROCKDRILL AB</span>
-          <div className="flex items-center space-x-1">
-             <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-             <span>SYSTEM STATUS: {isConnected ? 'OPERATIONAL' : 'OFFLINE'}</span>
-          </div>
+          <span className={isConnected ? "text-green-500" : "text-gray-300"}>● STATUS: {isConnected ? 'SYNC ACTIVE' : 'LOCAL MODE'}</span>
         </div>
         <div className="flex items-center space-x-4">
-           {lastSyncTime && <span>LAST SYNC: {lastSyncTime.toLocaleTimeString()}</span>}
-           <span className="text-black/20">|</span>
-           <span>VERSION 2.1.4</span>
+           {lastSyncTime && <span>LAST SUCCESSFUL SYNC: {lastSyncTime.toLocaleTimeString()}</span>}
+           <span className="text-black/10">|</span>
+           <span>MULTI-USER CLOUD v2.5.1</span>
         </div>
       </footer>
     </div>
