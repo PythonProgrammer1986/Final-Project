@@ -12,10 +12,10 @@ import {
   Upload, 
   RefreshCw, 
   Bell, 
-  BrainCircuit,
   Cloud,
   CloudOff,
-  Users as UsersIcon
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { AppState, Task, Project, Activity, KPI, SafetyStatus } from './types';
 import { BRAND, DEFAULT_USERS, DEFAULT_CATEGORIES, DEFAULT_AGENDA } from './constants';
@@ -29,11 +29,13 @@ import Masters from './components/Masters';
 
 const STORAGE_KEY = 'epiroc_management_data';
 const SYNC_KEY_STORAGE = 'epiroc_sync_id';
+const SYNC_API_BASE = 'https://jsonblob.com/api/jsonBlob';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('calendar');
   const [syncId, setSyncId] = useState<string>(localStorage.getItem(SYNC_KEY_STORAGE) || '');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [data, setData] = useState<AppState>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -52,142 +54,130 @@ const App: React.FC = () => {
 
   const [notifications, setNotifications] = useState<string[]>([]);
   const isUpdatingRef = useRef(false);
+  const lastCloudHashRef = useRef<string>('');
 
-  // Cloud Sync Logic
+  // Robust Sync Engine
   const syncWithCloud = useCallback(async (direction: 'push' | 'pull', stateToPush?: AppState) => {
-    if (!syncId) return;
-    setIsSyncing(true);
+    if (!syncId) {
+      setIsConnected(false);
+      return;
+    }
     
-    // Using a public anonymous storage API for the demo sync
-    // In a real production environment, use Supabase or Firebase
-    const url = `https://jsonblob.com/api/jsonBlob/${syncId}`;
+    setIsSyncing(true);
+    const url = `${SYNC_API_BASE}/${syncId}`;
 
     try {
       if (direction === 'push' && stateToPush) {
+        const currentHash = JSON.stringify(stateToPush);
+        // Don't push if data hasn't changed since last pull/push
+        if (currentHash === lastCloudHashRef.current) {
+          setIsSyncing(false);
+          return;
+        }
+
         await fetch(url, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(stateToPush)
+          body: currentHash
         });
+        lastCloudHashRef.current = currentHash;
       } else {
         const response = await fetch(url);
         if (response.ok) {
           const cloudData = await response.json();
-          // Simple check: Only update if cloud data is different
-          if (JSON.stringify(cloudData) !== JSON.stringify(data)) {
+          const cloudHash = JSON.stringify(cloudData);
+          
+          if (cloudHash !== JSON.stringify(data)) {
             isUpdatingRef.current = true;
             setData(cloudData);
+            lastCloudHashRef.current = cloudHash;
             setTimeout(() => { isUpdatingRef.current = false; }, 500);
           }
+          setIsConnected(true);
+        } else if (response.status === 404) {
+          setIsConnected(false); // ID no longer exists
         }
       }
       setLastSyncTime(new Date());
     } catch (error) {
-      console.error("Sync Error:", error);
+      console.error("Cloud Sync Error:", error);
+      setIsConnected(false);
     } finally {
       setIsSyncing(false);
     }
   }, [syncId, data]);
 
-  // Handle Local Data Changes
+  // Initial Sync & Periodical Pull
+  useEffect(() => {
+    if (syncId) {
+      syncWithCloud('pull');
+      const interval = setInterval(() => syncWithCloud('pull'), 15000); // Poll every 15s
+      return () => clearInterval(interval);
+    }
+  }, [syncId, syncWithCloud]);
+
+  // Handle Local Data Changes (Push)
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     
-    // Auto-push to cloud if sync is enabled and change was local
     if (syncId && !isUpdatingRef.current) {
       const timer = setTimeout(() => {
         syncWithCloud('push', data);
-      }, 1000); // Debounce push
+      }, 1500); // Debounce push to avoid too many requests
       return () => clearTimeout(timer);
     }
   }, [data, syncId, syncWithCloud]);
 
-  // Background Pull
-  useEffect(() => {
-    if (!syncId) return;
-    
-    // Pull every 30 seconds
-    const interval = setInterval(() => {
-      syncWithCloud('pull');
-    }, 30000);
-    
-    return () => clearInterval(interval);
-  }, [syncId, syncWithCloud]);
-
-  // Setup Sync ID
+  // Connection Handler (Masters Tab)
   const updateSyncId = async (id: string) => {
-    if (!id) {
+    if (!id || id.trim() === '') {
       setSyncId('');
+      setIsConnected(false);
       localStorage.removeItem(SYNC_KEY_STORAGE);
       return;
     }
 
-    // If it's a new ID, try to fetch or create
+    const trimmedId = id.trim();
     setIsSyncing(true);
     try {
-      // Check if blob exists
-      const res = await fetch(`https://jsonblob.com/api/jsonBlob/${id}`);
+      // 1. Try to fetch existing
+      const res = await fetch(`${SYNC_API_BASE}/${trimmedId}`);
       if (res.ok) {
         const cloudData = await res.json();
         setData(cloudData);
+        setSyncId(trimmedId);
+        localStorage.setItem(SYNC_KEY_STORAGE, trimmedId);
+        setIsConnected(true);
+        alert('Connected to Shared Team Database!');
       } else {
-        // Create it with current data
-        await fetch('https://jsonblob.com/api/jsonBlob', {
+        // 2. If not found, create new
+        const createRes = await fetch(SYNC_API_BASE, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Location': id },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
+        if (createRes.ok) {
+          // Extract ID from Location header: https://jsonblob.com/api/jsonBlob/ID
+          const location = createRes.headers.get('Location');
+          const newId = location ? location.split('/').pop() : trimmedId;
+          if (newId) {
+            setSyncId(newId);
+            localStorage.setItem(SYNC_KEY_STORAGE, newId);
+            setIsConnected(true);
+            alert(`New Team Database Created! Key: ${newId}`);
+          }
+        }
       }
-      setSyncId(id);
-      localStorage.setItem(SYNC_KEY_STORAGE, id);
-      alert('Joined Shared Session Successfully!');
     } catch (e) {
-      alert('Could not connect to sync service.');
+      alert('Network Error: Could not reach sync servers.');
+      setIsConnected(false);
     } finally {
       setIsSyncing(false);
     }
   };
 
-  // Automated checks
-  useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const overdue = data.tasks.filter(t => t.dueDate < today && t.status !== 'Completed').length;
-    const dueToday = data.tasks.filter(t => t.dueDate === today && t.status !== 'Completed').length;
-    
-    const newNotifications = [];
-    if (overdue > 0) newNotifications.push(`⚠️ ${overdue} Overdue tasks.`);
-    if (dueToday > 0) newNotifications.push(`📅 ${dueToday} due today.`);
-    setNotifications(newNotifications);
-  }, [data.tasks]);
-
   const updateData = (newData: Partial<AppState>) => {
     setData(prev => ({ ...prev, ...newData }));
-  };
-
-  const handleExport = () => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `epiroc_backup_${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const imported = JSON.parse(event.target?.result as string);
-        setData(imported);
-        alert('Data imported successfully!');
-      } catch (err) {
-        alert('Invalid data file');
-      }
-    };
-    reader.readAsText(file);
   };
 
   const tabs = [
@@ -202,6 +192,17 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8F9FA]">
+      {/* Dynamic Sync Banner for Unsynced Users */}
+      {!syncId && (
+        <div className="bg-[#FDB913] text-black text-[11px] font-extrabold py-2 px-8 flex justify-between items-center animate-in slide-in-from-top duration-500">
+           <div className="flex items-center space-x-2">
+             <CloudOff size={14} />
+             <span>TEAM SYNC DISABLED: YOU ARE CURRENTLY IN LOCAL MODE. CHANGES ARE NOT SHARED.</span>
+           </div>
+           <button onClick={() => setActiveTab('masters')} className="underline hover:no-underline">OPEN SYNC SETTINGS →</button>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-black text-white h-24 flex items-center px-8 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-1/3 h-full bg-[#FDB913] skew-x-[-20deg] translate-x-20 z-0"></div>
@@ -212,15 +213,19 @@ const App: React.FC = () => {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">EPIROC ROCKDRILL AB</h1>
             <div className="flex items-center space-x-2 text-[10px] opacity-80 uppercase tracking-widest font-medium">
-              <span>Complete Management System</span>
+              <span>Enterprise Management System</span>
               <span className="text-[#FDB913]">•</span>
-              {syncId ? (
-                <span className="flex items-center text-green-400">
-                  <Cloud size={10} className="mr-1" /> Multi-User Shared Session Active
+              {isConnected ? (
+                <span className="flex items-center text-green-400 font-bold">
+                  <Wifi size={10} className="mr-1 animate-pulse" /> CLOUD DATABASE CONNECTED
+                </span>
+              ) : syncId ? (
+                <span className="flex items-center text-red-400 font-bold">
+                  <WifiOff size={10} className="mr-1" /> CONNECTION LOST - RECONNECTING...
                 </span>
               ) : (
-                <span className="flex items-center text-gray-400">
-                  <CloudOff size={10} className="mr-1" /> Standalone Local Mode
+                <span className="flex items-center text-gray-500">
+                   STANDALONE MODE
                 </span>
               )}
             </div>
@@ -231,34 +236,26 @@ const App: React.FC = () => {
 
         <div className="flex items-center space-x-4 z-10 text-black font-semibold">
            {isSyncing && (
-             <div className="flex items-center space-x-2 text-white text-[10px] mr-4 animate-pulse">
+             <div className="flex items-center space-x-2 text-white text-[10px] mr-4">
                <RefreshCw size={12} className="animate-spin text-[#FDB913]" />
-               <span>SYNCING CLOUD...</span>
+               <span className="tracking-tighter">DATA SYNC...</span>
              </div>
            )}
-           <button onClick={handleExport} className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded hover:bg-gray-100 transition shadow-sm text-xs">
-             <Download size={14} /> <span>Export</span>
-           </button>
-           <label className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded hover:bg-gray-100 cursor-pointer transition shadow-sm text-xs">
-             <Upload size={14} /> <span>Import</span>
-             <input type="file" className="hidden" onChange={handleImport} />
-           </label>
            <div className="relative group">
               <button className="p-2 bg-white rounded shadow-sm hover:bg-gray-100 transition">
-                <Bell size={20} className={notifications.length > 0 ? "text-red-500 animate-pulse" : ""} />
+                <Bell size={20} className={notifications.length > 0 ? "text-red-500 animate-bounce" : ""} />
                 {notifications.length > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">{notifications.length}</span>}
               </button>
-              <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-gray-200 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto z-50 p-3">
-                <h3 className="font-bold border-bottom pb-2 mb-2 text-xs uppercase text-gray-400">Notifications</h3>
-                {notifications.length === 0 ? <p className="text-gray-500 text-xs">No alerts today</p> : 
-                  notifications.map((n, i) => <p key={i} className="text-xs mb-2 text-gray-800 border-l-2 border-[#FDB913] pl-2">{n}</p>)}
-              </div>
+           </div>
+           <div className="flex flex-col items-end">
+             <span className="text-white text-[10px] opacity-60 uppercase tracking-tighter">Current Session</span>
+             <span className="text-[#FDB913] text-xs font-mono">{syncId ? `ID: ${syncId.substring(0,8)}...` : 'OFFLINE'}</span>
            </div>
         </div>
       </header>
 
       {/* Tabs Navigation */}
-      <nav className="bg-white border-b border-gray-200 sticky top-0 z-40">
+      <nav className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
         <div className="max-w-7xl mx-auto flex">
           {tabs.map(tab => (
             <button
@@ -266,12 +263,12 @@ const App: React.FC = () => {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center space-x-2 px-6 py-4 transition-all border-b-2 ${
                 activeTab === tab.id 
-                ? 'border-[#FDB913] text-black font-bold bg-gray-50' 
+                ? 'border-[#FDB913] text-black font-extrabold bg-gray-50' 
                 : 'border-transparent text-gray-500 hover:text-black hover:bg-gray-50'
               }`}
             >
               {tab.icon}
-              <span className="text-sm uppercase tracking-wide">{tab.name}</span>
+              <span className="text-sm uppercase tracking-wider">{tab.name}</span>
             </button>
           ))}
         </div>
@@ -332,12 +329,14 @@ const App: React.FC = () => {
       <footer className="bg-white border-t border-gray-200 py-3 px-8 flex justify-between items-center text-[10px] text-gray-400 font-medium uppercase tracking-widest">
         <div className="flex items-center space-x-4">
           <span>© {new Date().getFullYear()} EPIROC ROCKDRILL AB</span>
-          <span className="text-[#FDB913]">● {syncId ? 'CLOUD SYNC ACTIVE' : 'LOCAL CACHE ACTIVE'}</span>
-          {lastSyncTime && <span className="text-gray-300">Last Sync: {lastSyncTime.toLocaleTimeString()}</span>}
+          <span className={isConnected ? "text-green-500 font-bold" : "text-gray-300"}>
+            ● {isConnected ? 'TEAM CLOUD SYNC: ONLINE' : 'LOCAL CACHE: ACTIVE'}
+          </span>
+          {lastSyncTime && <span className="text-gray-300">Last Sync Check: {lastSyncTime.toLocaleTimeString()}</span>}
         </div>
         <div className="flex items-center space-x-2">
-           <span className={syncId ? "text-green-500" : "text-gray-400"}>NETWORK: {syncId ? 'CONNECTED' : 'DISCONNECTED'}</span>
-           <span className={`w-1.5 h-1.5 rounded-full ${syncId ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+           <span className={isConnected ? "text-green-500" : "text-gray-400"}>NETWORK: {isConnected ? 'LIVE' : 'DISCONNECTED'}</span>
+           <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`}></span>
         </div>
       </footer>
     </div>
