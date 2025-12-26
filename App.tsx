@@ -20,7 +20,7 @@ import Masters from './components/Masters';
 import HoursBooking from './components/HoursBooking';
 
 const STORAGE_KEY = 'epiroc_pulse_v5_final';
-const APP_VERSION = '5.4.0';
+const APP_VERSION = '5.5.0';
 
 const tabs = [
   { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
@@ -94,7 +94,6 @@ const App: React.FC = () => {
       
       setData(prev => ({ ...prev, lastBackupDate: today }));
       setNeedsBackupAuth(false);
-      console.log(`✓ Auto-backup snapshot created: ${fileName}`);
     } catch (err) {
       console.error("Auto-backup failed", err);
       setNeedsBackupAuth(true);
@@ -221,7 +220,7 @@ const App: React.FC = () => {
         <div className="bg-[#E74C3C] text-white py-2 px-8 flex items-center justify-between text-[11px] font-black uppercase tracking-widest z-[100] shadow-lg">
           <div className="flex items-center space-x-3">
              <AlertTriangle size={14} />
-             <span>Security Alert: Daily Backup Engine requires authorization</span>
+             <span>Daily Backup Engine requires authorization</span>
           </div>
           <button onClick={reAuthBackup} className="bg-white text-[#E74C3C] px-4 py-1 rounded-full flex items-center space-x-2 hover:bg-zinc-100 transition shadow-sm font-black">
             <Play size={10} fill="currentColor" />
@@ -231,30 +230,41 @@ const App: React.FC = () => {
       )}
 
       {/* Brand Header - epiroc yellow background as requested */}
-      <header className={`h-28 flex items-center px-8 relative overflow-hidden transition-colors duration-500 bg-[#FDB913] text-[#3d4d5b]`}>
-        <div className="flex flex-col z-10 space-y-2">
-          {/* Epiroc Precise Brand Logo Reconstruction */}
-          <div className="flex items-center space-x-4">
-            <svg viewBox="0 0 350 100" className="h-16 w-auto" fill="currentColor">
-              {/* Hexagon Shape */}
-              <path d="M78 25L52.5 10.5L27 25v29L52.5 68.5L78 54V25z" />
-              {/* Inner stylized 'e' mark (matching brand geometry) */}
-              <path fill="#FDB913" d="M52.5 16.5L34 27.2v21l18.5 10.7l18.5-10.7v-21L52.5 16.5zm8.7 28.2l-8.7 5l-8.7-5V30.6l8.7 5v8.6l8.7-5v-5.5l-8.7-5l-8.7 5l17.4 10v20.6l-17.4 10l-17.4-10v-20.6l17.4-10l8.7 5v5.5l-8.7-5v-8.6l-8.7 5v14.1l8.7 5l8.7-5v-5.5h0z" />
-              {/* Epiroc Wordmark */}
-              <text x="95" y="60" fontFamily="Inter, sans-serif" fontWeight="900" fontSize="48" letterSpacing="-1">Epiroc</text>
+      <header className={`h-32 flex items-center px-8 relative overflow-hidden transition-colors duration-500 bg-[#FDB913] text-[#3d4d5b]`}>
+        <div className="flex flex-col z-10">
+          {/* Epiroc Logo: Wordmark strictly as per attached image */}
+          <div className="flex items-center">
+            <svg viewBox="0 0 500 120" className="h-20 w-auto" fill="#3D444F">
+              {/* Stylized 'e' inner cutout */}
+              <path d="M65 24L42 37V68L65 81L88 68V37L65 24ZM74 62L65 67L56 62V43L65 38L74 43V48L65 43V40L60 43V62L65 65L70 62V58H74V62Z" fill="#FDB913"/>
+              
+              {/* Wordmark reconstructed with paths for accuracy and consistency */}
+              <g transform="translate(130, 28)">
+                {/* E */}
+                <path d="M0 0H35V12H13V24H32V36H13V48H36V60H0V0Z"/>
+                {/* p */}
+                <path d="M48 18V76H60V62H61C64 67 69 70 75 70C86 70 95 61 95 44C95 27 86 18 75 18C69 18 64 21 61 26H60V18H48ZM72 30C78 30 82 34 82 44C82 54 78 58 72 58C66 58 62 54 62 44C62 34 66 30 72 30Z"/>
+                {/* i */}
+                <path d="M108 0H120V12H108V0ZM108 18H120V70H108V18Z"/>
+                {/* r */}
+                <path d="M133 18H145V28H146C148 22 153 18 160 18V31C154 31 148 34 146 39V70H133V18Z"/>
+                {/* o */}
+                <path d="M190 18C177 18 168 28 168 44C168 60 177 70 190 70C203 70 212 60 212 44C212 28 203 18 190 18ZM190 30C196 30 200 34 200 44C200 54 196 58 190 58C184 58 180 54 180 44C180 34 184 30 190 30Z"/>
+                {/* c */}
+                <path d="M255 38C253 33 249 30 243 30C237 30 233 35 233 44C233 53 237 58 243 58C249 58 253 55 255 50H268C265 62 255 70 243 70C229 70 220 60 220 44C220 28 229 18 243 18C255 18 265 26 268 38H255Z"/>
+              </g>
             </svg>
           </div>
 
-          {/* Status Bar (functional text only) */}
-          <div className="flex items-center space-x-4 ml-2 text-[9px] uppercase tracking-[0.2em] font-black opacity-70">
+          {/* Operational Status below logo - only icons and minimal functional text */}
+          <div className="flex items-center space-x-6 ml-1 mt-2 text-[9px] uppercase tracking-[0.25em] font-black opacity-80">
             <span className="flex items-center">
-              {fileHandle ? <Wifi size={10} className="mr-1.5" /> : <WifiOff size={10} className="mr-1.5" />}
-              {fileHandle ? 'NETWORK LEDGER ACTIVE' : 'LOCAL CACHE MODE'}
+              {fileHandle ? <Wifi size={11} className="mr-2" /> : <WifiOff size={11} className="mr-2" />}
+              {fileHandle ? 'CONNECTED' : 'STANDALONE'}
             </span>
-            <span>•</span>
             <span className="flex items-center">
-              <ShieldCheck size={10} className={`mr-1.5 ${backupDirHandle ? 'text-green-700' : ''}`} />
-              BACKUP: {backupDirHandle ? 'CONNECTED' : 'DISCONNECTED'}
+              <ShieldCheck size={11} className={`mr-2 ${backupDirHandle ? 'text-green-700' : ''}`} />
+              BACKUP: {backupDirHandle ? 'ACTIVE' : 'OFF'}
             </span>
           </div>
         </div>
@@ -263,29 +273,29 @@ const App: React.FC = () => {
 
         <div className="flex items-center space-x-4 z-10">
            {!isReadOnly && (
-              <button onClick={exportData} title="Manual Data Export" className="p-3 bg-[#3d4d5b]/10 rounded-full hover:bg-[#3d4d5b]/20 transition group">
-                <Download size={20} className="group-hover:scale-110 transition" />
+              <button onClick={exportData} title="Export System Data" className="p-3.5 bg-[#3d4d5b]/10 rounded-full hover:bg-[#3d4d5b]/20 transition group">
+                <Download size={22} className="group-hover:translate-y-0.5 transition" />
               </button>
            )}
            
            {fileHandle ? (
-             <div className="flex items-center bg-[#3d4d5b]/5 px-6 py-3 rounded-full border border-[#3d4d5b]/10 space-x-6">
-                <div className="flex flex-col items-end border-r border-[#3d4d5b]/10 pr-6">
-                  <span className="text-[8px] font-black uppercase opacity-60">Sync Status</span>
+             <div className="flex items-center bg-[#3d4d5b]/5 px-8 py-4 rounded-full border border-[#3d4d5b]/10 space-x-8">
+                <div className="flex flex-col items-end border-r border-[#3d4d5b]/10 pr-8">
+                  <span className="text-[9px] font-black uppercase opacity-60 tracking-widest">Database Sync</span>
                   <div className="flex items-center space-x-2">
                     {isAutoSaving ? <RefreshCw size={12} className="animate-spin" /> : <Save size={12} />}
-                    <span className="text-[10px] font-black tracking-tighter">{isAutoSaving ? 'SYNCING' : 'SYNCHRONIZED'}</span>
+                    <span className="text-[11px] font-black tracking-tighter">{isAutoSaving ? 'SYNCING...' : 'UP TO DATE'}</span>
                   </div>
                 </div>
                 <div className="flex flex-col items-end">
-                   <span className="text-[8px] font-black uppercase opacity-60">Last Updated</span>
-                   <span className="text-[10px] font-black">{lastSyncTime ? lastSyncTime.toLocaleTimeString() : '--:--'}</span>
+                   <span className="text-[9px] font-black uppercase opacity-60 tracking-widest">Session End</span>
+                   <span className="text-[11px] font-black">{lastSyncTime ? lastSyncTime.toLocaleTimeString() : '--:--'}</span>
                 </div>
              </div>
            ) : !isReadOnly && (
-             <button onClick={linkSharedFile} className="bg-[#3d4d5b] text-[#FDB913] hover:brightness-110 px-8 py-4 rounded-full font-black text-xs uppercase tracking-[0.2em] shadow-xl flex items-center space-x-3 transition-all">
-               <FileCode size={18} />
-               <span>CONNECT TEAM LEDGER</span>
+             <button onClick={linkSharedFile} className="bg-[#3d4d5b] text-[#FDB913] hover:brightness-110 px-10 py-5 rounded-full font-black text-xs uppercase tracking-[0.25em] shadow-2xl flex items-center space-x-4 transition-all">
+               <FileCode size={20} />
+               <span>ESTABLISH TEAM LINK</span>
              </button>
            )}
         </div>
@@ -325,14 +335,14 @@ const App: React.FC = () => {
                     <Database size={32} />
                   </div>
                   <div>
-                    <h3 className="text-xl font-black uppercase tracking-tight">Epiroc Daily Backup Engine</h3>
+                    <h3 className="text-xl font-black uppercase tracking-tight">System Snapshot Controller</h3>
                     <p className="text-sm text-gray-500 font-bold uppercase tracking-widest">
-                      {backupDirHandle ? `Current Snapshot Target: ${backupDirHandle.name}` : 'Select a destination folder for daily database snapshots (Network Drive recommended)'}
+                      {backupDirHandle ? `Current Active Path: ${backupDirHandle.name}` : 'Establish a daily snapshot target directory for disaster recovery'}
                     </p>
                   </div>
                </div>
                <button onClick={linkBackupDir} className="bg-black text-[#FDB913] px-8 py-3 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl transition hover:brightness-110">
-                 {backupDirHandle ? 'Change Target Folder' : 'Enable Daily Snapshot'}
+                 {backupDirHandle ? 'REMAP TARGET' : 'ENABLE SNAPSHOTS'}
                </button>
             </div>
             <Masters users={data.users} categories={data.categories} updateUsers={(users) => updateData({ users })} updateCategories={(categories) => updateData({ categories })} />
