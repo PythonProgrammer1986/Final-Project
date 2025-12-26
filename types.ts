@@ -3,6 +3,17 @@ export type Status = 'Not Started' | 'In Progress' | 'Completed' | 'Blocked' | '
 export type Priority = 'High' | 'Medium' | 'Low';
 export type ProjectStatus = 'Planning' | 'In Progress' | 'On Hold' | 'Completed' | 'Cancelled';
 
+export interface HistoryEntry {
+  timestamp: string;
+  change: string;
+}
+
+export interface Comment {
+  user: string;
+  timestamp: string;
+  comment: string;
+}
+
 export interface Task {
   id: string;
   category: string;
@@ -15,8 +26,11 @@ export interface Task {
   hours: number;
   startDate: string;
   dueDate: string;
-  completionDate?: string;
+  originalDueDate?: string;
   notes: string;
+  okrLink?: string;
+  history: HistoryEntry[];
+  comments: Comment[];
 }
 
 export interface Project {
@@ -30,6 +44,45 @@ export interface Project {
   description: string;
 }
 
+export interface Idea {
+  id: string;
+  idea: string;
+  proposer: string;
+  impact: 'High' | 'Medium' | 'Low';
+  cost: 'High' | 'Medium' | 'Low';
+  status: 'New' | 'Under Review' | 'Approved' | 'Implemented' | 'Rejected';
+  date: string;
+}
+
+export interface Kudos {
+  id: string;
+  from: string;
+  to: string;
+  reason: string;
+  date: string;
+}
+
+export interface KeyResult {
+  id: string;
+  kr: string;
+}
+
+export interface OKR {
+  id: string;
+  objective: string;
+  keyResults: KeyResult[];
+}
+
+export interface User {
+  name: string;
+  capacity: number;
+}
+
+// Export SafetyStatus for use in CalendarView.tsx
+export type SafetyStatusEntry = { status: 'green' | 'yellow' | 'red'; notes: string };
+export type SafetyStatus = Record<string, SafetyStatusEntry>;
+
+// Export Activity for use in ActivityTracker.tsx
 export interface Activity {
   id: string;
   date: string;
@@ -40,6 +93,7 @@ export interface Activity {
   remarks: string;
 }
 
+// Export KPI for use in KPITracker.tsx
 export interface KPI {
   id: string;
   name: string;
@@ -48,20 +102,14 @@ export interface KPI {
   remarks: string;
 }
 
-export interface SafetyStatus {
-  [date: string]: {
-    status: 'green' | 'yellow' | 'red';
-    notes: string;
-  };
-}
-
 export interface AppState {
   tasks: Task[];
   projects: Project[];
-  activities: Activity[];
-  kpis: KPI[];
-  users: string[];
+  ideas: Idea[];
+  kudos: Kudos[];
+  okrs: OKR[];
+  users: User[];
   categories: string[];
-  safetyStatus: SafetyStatus;
+  safetyStatus: Record<string, { status: 'green' | 'yellow' | 'red'; notes: string }>;
   dailyAgenda: Record<string, string>;
 }

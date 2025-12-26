@@ -1,22 +1,26 @@
 
 import React, { useState, useMemo } from 'react';
-import { Task, Status, Priority } from '../types';
+import { Task, Status, Priority, OKR } from '../types';
 import { BRAND } from '../constants';
-import { Plus, Edit2, Trash2, Search, Filter, Download } from 'lucide-react';
+import { Plus, Edit2, Trash2, Search, Filter, History, MessageSquare, Target } from 'lucide-react';
+// Added missing date-fns imports
+import { format, parseISO } from 'date-fns';
 
 interface TaskBoardProps {
   tasks: Task[];
   users: string[];
   categories: string[];
   projects: any[];
+  okrs: OKR[];
   updateTasks: (tasks: Task[]) => void;
 }
 
-const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, projects, updateTasks }) => {
+const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, projects, okrs, updateTasks }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterOwner, setFilterOwner] = useState('All');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [activeSubTab, setActiveSubTab] = useState<'details' | 'history'>('details');
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
@@ -41,26 +45,30 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
       hours: parseFloat(formData.get('hours') as string),
       startDate: formData.get('startDate') as string,
       dueDate: formData.get('dueDate') as string,
+      okrLink: formData.get('okrLink') as string,
       notes: formData.get('notes') as string,
     };
 
     if (editingTask) {
-      updateTasks(tasks.map(t => t.id === editingTask.id ? { ...t, ...taskData } : t));
+      const history = [...(editingTask.history || [])];
+      if (editingTask.status !== taskData.status) {
+        history.push({ timestamp: new Date().toISOString(), change: `Status changed to ${taskData.status}` });
+      }
+      if (editingTask.owner !== taskData.owner) {
+        history.push({ timestamp: new Date().toISOString(), change: `Owner reassigned to ${taskData.owner}` });
+      }
+      updateTasks(tasks.map(t => t.id === editingTask.id ? { ...t, ...taskData, history } : t));
     } else {
       const newTask: Task = {
         id: Math.random().toString(36).substr(2, 9),
+        history: [{ timestamp: new Date().toISOString(), change: 'Task created' }],
+        comments: [],
         ...taskData as any
       };
       updateTasks([...tasks, newTask]);
     }
     setShowModal(false);
     setEditingTask(null);
-  };
-
-  const handleDelete = (id: string) => {
-    if (confirm('Delete this task?')) {
-      updateTasks(tasks.filter(t => t.id !== id));
-    }
   };
 
   const getStatusColor = (status: Status) => {
@@ -75,172 +83,187 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap justify-between items-center gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-100">
+      <div className="flex flex-wrap justify-between items-center gap-4 bg-white p-4 rounded shadow-sm border border-gray-100">
         <div className="flex items-center space-x-4 flex-1 max-w-2xl">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
               type="text"
-              placeholder="Search tasks or owners..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-[#FDB913]"
+              placeholder="Filter tasks..."
+              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded text-sm outline-none"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <div className="flex items-center space-x-2">
-            <Filter size={18} className="text-gray-400" />
-            <select
-              className="border border-gray-200 rounded-md px-3 py-2 text-sm"
-              value={filterOwner}
-              onChange={(e) => setFilterOwner(e.target.value)}
-            >
-              <option value="All">All Owners</option>
-              {users.map(u => <option key={u} value={u}>{u}</option>)}
-            </select>
-          </div>
+          <select
+            className="border border-gray-200 rounded px-3 py-2 text-xs font-black uppercase"
+            value={filterOwner}
+            onChange={(e) => setFilterOwner(e.target.value)}
+          >
+            <option value="All">All People</option>
+            {users.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
         </div>
         <button
-          onClick={() => { setEditingTask(null); setShowModal(true); }}
-          className="bg-black text-[#FDB913] px-6 py-2 rounded-md font-bold flex items-center space-x-2 hover:bg-[#222] transition"
+          onClick={() => { setEditingTask(null); setShowModal(true); setActiveSubTab('details'); }}
+          className="bg-black text-[#FDB913] px-6 py-2 rounded font-black text-xs uppercase tracking-widest shadow-lg"
         >
-          <Plus size={20} />
-          <span>ADD TASK</span>
+          Add Pulse Task
         </button>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-500">Task</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-500">Owner</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-500">Status</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-500">Priority</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-500">Progress</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-500">Due Date</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-gray-500 text-right">Actions</th>
+      <div className="bg-white rounded shadow-sm border border-gray-100 overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Operation Detail</th>
+              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Stakeholder</th>
+              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Status</th>
+              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest text-right">Progress</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filteredTasks.map(t => (
+              <tr key={t.id} className="hover:bg-gray-50/50 transition group cursor-pointer" onClick={() => { setEditingTask(t); setShowModal(true); }}>
+                <td className="px-6 py-4">
+                  <p className="font-bold text-gray-800 text-sm">{t.task}</p>
+                  <div className="flex items-center space-x-2 mt-1">
+                    <span className="text-[9px] font-black uppercase bg-gray-100 px-2 py-0.5 rounded">{t.category}</span>
+                    <span className={`text-[9px] font-black uppercase ${t.priority === 'High' ? 'text-red-500' : 'text-gray-400'}`}>{t.priority} PRIORITY</span>
+                  </div>
+                </td>
+                <td className="px-6 py-4 text-sm font-bold text-gray-700">{t.owner}</td>
+                <td className="px-6 py-4">
+                  <span className={`px-2 py-1 rounded text-[9px] font-black uppercase ${getStatusColor(t.status)}`}>{t.status}</span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <div className="flex flex-col items-end">
+                    <span className="text-xs font-black text-gray-900">{t.progress}%</span>
+                    <div className="w-24 bg-gray-100 h-1 rounded-full mt-1">
+                      <div className="bg-black h-1 rounded-full" style={{ width: `${t.progress}%` }}></div>
+                    </div>
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredTasks.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-10 text-center text-gray-400 italic">No tasks found. Click "Add Task" to create one.</td>
-                </tr>
-              ) : filteredTasks.map(t => (
-                <tr key={t.id} className="hover:bg-gray-50/50 transition">
-                  <td className="px-6 py-4">
-                    <p className="font-bold text-gray-800 line-clamp-1">{t.task}</p>
-                    <p className="text-[10px] text-gray-400 uppercase tracking-tighter">{t.category} • {t.project}</p>
-                  </td>
-                  <td className="px-6 py-4 text-sm font-medium">{t.owner}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${getStatusColor(t.status)}`}>
-                      {t.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`text-xs font-bold ${t.priority === 'High' ? 'text-red-500' : t.priority === 'Medium' ? 'text-orange-500' : 'text-blue-500'}`}>
-                      {t.priority}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="w-full bg-gray-100 rounded-full h-1.5 max-w-[100px]">
-                      <div className="bg-[#FDB913] h-1.5 rounded-full" style={{ width: `${t.progress}%` }}></div>
-                    </div>
-                    <span className="text-[10px] text-gray-400 font-bold">{t.progress}%</span>
-                  </td>
-                  <td className="px-6 py-4 text-sm font-medium">{t.dueDate}</td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end space-x-2">
-                      <button onClick={() => { setEditingTask(t); setShowModal(true); }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"><Edit2 size={16} /></button>
-                      <button onClick={() => handleDelete(t.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 size={16} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#FDB913]">
-              <h2 className="text-xl font-bold">{editingTask ? 'Edit Task' : 'New Task'}</h2>
-              <button onClick={() => setShowModal(false)} className="text-black font-bold text-xl hover:opacity-50">×</button>
+          <div className="bg-white rounded shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-6 bg-[#FDB913] text-black flex justify-between items-center shrink-0">
+              <h2 className="text-xl font-black uppercase tracking-tight">{editingTask ? 'Manage Operation' : 'Initiate New Operation'}</h2>
+              <button onClick={() => setShowModal(false)} className="font-black text-2xl">×</button>
             </div>
-            <form onSubmit={handleSaveTask} className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Task Title *</label>
-                  <input name="task" required defaultValue={editingTask?.task} className="w-full border border-gray-200 rounded px-3 py-2" />
+            
+            <div className="flex bg-gray-50 border-b shrink-0">
+              <button onClick={() => setActiveSubTab('details')} className={`px-8 py-3 text-[10px] font-black uppercase tracking-widest ${activeSubTab === 'details' ? 'border-b-2 border-black bg-white' : 'text-gray-400'}`}>Details</button>
+              {editingTask && (
+                <button onClick={() => setActiveSubTab('history')} className={`px-8 py-3 text-[10px] font-black uppercase tracking-widest ${activeSubTab === 'history' ? 'border-b-2 border-black bg-white' : 'text-gray-400'}`}>History Log</button>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+              {activeSubTab === 'details' ? (
+                <form id="taskForm" onSubmit={handleSaveTask} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="col-span-2">
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Task Description *</label>
+                      <input name="task" required defaultValue={editingTask?.task} className="w-full border p-3 rounded font-bold" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Stakeholder *</label>
+                      <select name="owner" required defaultValue={editingTask?.owner} className="w-full border p-2 rounded">
+                        {users.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Taxonomy Category</label>
+                      <select name="category" defaultValue={editingTask?.category} className="w-full border p-2 rounded">
+                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Associated Project</label>
+                      <select name="project" defaultValue={editingTask?.project} className="w-full border p-2 rounded">
+                        <option value="">No Project</option>
+                        {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Strategic OKR Link</label>
+                      <select name="okrLink" defaultValue={editingTask?.okrLink} className="w-full border p-2 rounded">
+                        <option value="">No Strategic Link</option>
+                        {okrs.map(o => <option key={o.id} value={o.id}>{o.objective}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Status</label>
+                      <select name="status" defaultValue={editingTask?.status || 'Not Started'} className="w-full border p-2 rounded">
+                        {['Not Started', 'In Progress', 'Completed', 'Blocked', 'On Hold'].map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Priority Level</label>
+                      <select name="priority" defaultValue={editingTask?.priority || 'Medium'} className="w-full border p-2 rounded">
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High Priority</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Progress (%)</label>
+                      <input type="number" name="progress" min="0" max="100" defaultValue={editingTask?.progress || 0} className="w-full border p-2 rounded" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Est. Duration (Hrs)</label>
+                      <input type="number" step="0.5" name="hours" defaultValue={editingTask?.hours || 0} className="w-full border p-2 rounded" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Deployment Date</label>
+                      <input type="date" name="startDate" defaultValue={editingTask?.startDate} className="w-full border p-2 rounded" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Target Delivery Date</label>
+                      <input type="date" name="dueDate" defaultValue={editingTask?.dueDate} className="w-full border p-2 rounded" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Operational Notes</label>
+                      <textarea name="notes" rows={3} defaultValue={editingTask?.notes} className="w-full border p-3 rounded text-sm"></textarea>
+                    </div>
+                  </div>
+                </form>
+              ) : (
+                <div className="space-y-4">
+                  {editingTask?.history?.map((entry, idx) => (
+                    <div key={idx} className="flex space-x-4">
+                      <div className="w-24 shrink-0 text-[9px] font-black text-gray-400 mt-1 uppercase leading-none">
+                        {format(parseISO(entry.timestamp), 'MMM d, HH:mm')}
+                      </div>
+                      <div className="flex-1 pb-4 border-l-2 border-gray-100 pl-6 relative">
+                         <div className="absolute w-2 h-2 rounded-full bg-black -left-1.5 top-0.5"></div>
+                         <p className="text-xs font-black text-gray-800 uppercase tracking-tight">{entry.change}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {(!editingTask?.history || editingTask.history.length === 0) && (
+                    <p className="text-sm text-gray-400 italic">No history logged for this operation.</p>
+                  )}
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Category</label>
-                  <select name="category" defaultValue={editingTask?.category} className="w-full border border-gray-200 rounded px-3 py-2">
-                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Project</label>
-                  <select name="project" defaultValue={editingTask?.project} className="w-full border border-gray-200 rounded px-3 py-2">
-                    <option value="">None</option>
-                    {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Owner *</label>
-                  <select name="owner" required defaultValue={editingTask?.owner} className="w-full border border-gray-200 rounded px-3 py-2">
-                    {users.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Status</label>
-                  <select name="status" defaultValue={editingTask?.status || 'Not Started'} className="w-full border border-gray-200 rounded px-3 py-2">
-                    <option value="Not Started">Not Started</option>
-                    <option value="In Progress">In Progress</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Blocked">Blocked</option>
-                    <option value="On Hold">On Hold</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Priority</label>
-                  <select name="priority" defaultValue={editingTask?.priority || 'Medium'} className="w-full border border-gray-200 rounded px-3 py-2">
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Progress (%)</label>
-                  <input type="number" name="progress" min="0" max="100" defaultValue={editingTask?.progress || 0} className="w-full border border-gray-200 rounded px-3 py-2" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Start Date</label>
-                  <input type="date" name="startDate" defaultValue={editingTask?.startDate} className="w-full border border-gray-200 rounded px-3 py-2" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Due Date</label>
-                  <input type="date" name="dueDate" defaultValue={editingTask?.dueDate} className="w-full border border-gray-200 rounded px-3 py-2" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Est. Hours</label>
-                  <input type="number" step="0.5" name="hours" defaultValue={editingTask?.hours || 0} className="w-full border border-gray-200 rounded px-3 py-2" />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Notes</label>
-                  <textarea name="notes" rows={3} defaultValue={editingTask?.notes} className="w-full border border-gray-200 rounded px-3 py-2"></textarea>
-                </div>
-              </div>
-              <div className="flex justify-end space-x-3 pt-4 border-t">
-                <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2 border border-gray-200 rounded font-bold">CANCEL</button>
-                <button type="submit" className="px-6 py-2 bg-black text-[#FDB913] rounded font-bold">SAVE TASK</button>
-              </div>
-            </form>
+              )}
+            </div>
+
+            <div className="p-6 border-t bg-gray-50 flex justify-between items-center shrink-0">
+               {editingTask && (
+                 <button type="button" onClick={() => { if(confirm('Purge this operation?')) { updateTasks(tasks.filter(t => t.id !== editingTask.id)); setShowModal(false); } }} className="text-red-500 text-[10px] font-black uppercase tracking-widest">Delete Operation</button>
+               )}
+               <div className="flex space-x-3 ml-auto">
+                <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2 text-[10px] font-black uppercase">Cancel</button>
+                <button type="submit" form="taskForm" className="px-8 py-3 bg-black text-[#FDB913] rounded font-black uppercase tracking-widest shadow-xl">Commit Changes</button>
+               </div>
+            </div>
           </div>
         </div>
       )}
