@@ -14,6 +14,16 @@ export interface Comment {
   comment: string;
 }
 
+export interface Booking {
+  id: string;
+  date: string;
+  userId: string;
+  targetId: string; // Task or Project ID
+  targetType: 'task' | 'project';
+  hours: number;
+  description: string;
+}
+
 export interface Task {
   id: string;
   category: string;
@@ -23,7 +33,7 @@ export interface Task {
   status: Status;
   priority: Priority;
   progress: number;
-  hours: number;
+  hours: number; // Estimated hours
   startDate: string;
   dueDate: string;
   originalDueDate?: string;
@@ -40,8 +50,28 @@ export interface Project {
   status: ProjectStatus;
   startDate: string;
   endDate: string;
-  hours: number;
+  hours: number; // Estimated hours
   description: string;
+}
+
+// Added Activity interface to fix import error in ActivityTracker.tsx
+export interface Activity {
+  id: string;
+  date: string;
+  person: string;
+  activity: string;
+  hours: number;
+  status: 'Completed' | 'In Progress' | 'Blocked';
+  remarks: string;
+}
+
+// Added KPI interface to fix import error in KPITracker.tsx
+export interface KPI {
+  id: string;
+  name: string;
+  target: string;
+  completion: number;
+  remarks: string;
 }
 
 export interface Idea {
@@ -78,29 +108,8 @@ export interface User {
   capacity: number;
 }
 
-// Export SafetyStatus for use in CalendarView.tsx
 export type SafetyStatusEntry = { status: 'green' | 'yellow' | 'red'; notes: string };
 export type SafetyStatus = Record<string, SafetyStatusEntry>;
-
-// Export Activity for use in ActivityTracker.tsx
-export interface Activity {
-  id: string;
-  date: string;
-  person: string;
-  activity: string;
-  hours: number;
-  status: 'Completed' | 'In Progress' | 'Blocked';
-  remarks: string;
-}
-
-// Export KPI for use in KPITracker.tsx
-export interface KPI {
-  id: string;
-  name: string;
-  target: string;
-  completion: number;
-  remarks: string;
-}
 
 export interface AppState {
   tasks: Task[];
@@ -109,7 +118,9 @@ export interface AppState {
   kudos: Kudos[];
   okrs: OKR[];
   users: User[];
+  bookings: Booking[];
   categories: string[];
   safetyStatus: Record<string, { status: 'green' | 'yellow' | 'red'; notes: string }>;
   dailyAgenda: Record<string, string>;
+  lastBackupDate?: string;
 }

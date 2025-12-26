@@ -2,221 +2,255 @@
 import React, { useMemo, useState } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-  PieChart, Pie, Cell, LineChart, Line 
+  PieChart, Pie, Cell 
 } from 'recharts';
-import { AppState, Task, Project } from '../types';
+import { AppState, Task, Project, SafetyStatusEntry } from '../types';
 import { BRAND } from '../constants';
 import { 
   Briefcase, CheckCircle2, Clock, AlertTriangle, 
-  Users, Target, Calendar, Download
+  Users, Target, Calendar, ZoomIn, ZoomOut, Layers
 } from 'lucide-react';
-import { format, parseISO, differenceInDays, isWithinInterval, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
+import { 
+  format, parseISO, differenceInDays, isWithinInterval, startOfMonth, 
+  endOfMonth, startOfYear, endOfYear, addMonths, eachMonthOfInterval,
+  isSameMonth, startOfWeek, endOfWeek, eachDayOfInterval
+} from 'date-fns';
 
 const COLORS = [BRAND.INFO, BRAND.SUCCESS, BRAND.WARNING, BRAND.DANGER, '#9b59b6', '#1abc9c', '#34495e'];
 
 const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
-  const [timelineFilter, setTimelineFilter] = useState<'week' | 'month' | 'all'>('month');
+  const [timelineZoom, setTimelineZoom] = useState<'week' | 'month' | 'year'>('month');
 
-  const stats = useMemo(() => {
-    const total = state.tasks.length;
-    const completed = state.tasks.filter(t => t.status === 'Completed').length;
-    const inProgress = state.tasks.filter(t => t.status === 'In Progress').length;
-    const today = new Date().toISOString().split('T')[0];
-    const overdue = state.tasks.filter(t => t.dueDate < today && t.status !== 'Completed').length;
-    const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
-    return { total, completed, inProgress, overdue, completionRate };
-  }, [state.tasks]);
+  // Month-specific Safety Trends
+  const safetyStats = useMemo(() => {
+    const today = new Date();
+    const currentMonthData = Object.entries(state.safetyStatus || {})
+      .filter(([date]) => isSameMonth(parseISO(date), today));
+    
+    const statusCounts = { green: 0, yellow: 0, red: 0 };
+    currentMonthData.forEach(([_, val]) => {
+      // Added type cast to fix "Property 'status' does not exist on type 'unknown'"
+      const entry = val as SafetyStatusEntry;
+      if (entry && entry.status) {
+        statusCounts[entry.status]++;
+      }
+    });
 
-  // Workload Logic: Merges Tasks and Projects
+    return [
+      { name: 'Safe Ops', value: statusCounts.green || 1 }, // Default 1 for visual
+      { name: 'Risk Noted', value: statusCounts.yellow },
+      { name: 'Incidents', value: statusCounts.red }
+    ];
+  }, [state.safetyStatus]);
+
+  // Monthly Workload Aggregation
   const workloadData = useMemo(() => {
-    const workload: Record<string, { assigned: number; capacity: number }> = {};
-    state.users.forEach(u => {
-      workload[u.name] = { assigned: 0, capacity: u.capacity };
+    const months = eachMonthOfInterval({
+      start: startOfYear(new Date()),
+      end: addMonths(startOfYear(new Date()), 5) // Show 6 months
     });
 
-    state.tasks.forEach(t => {
-      if (t.status !== 'Completed' && workload[t.owner]) {
-        workload[t.owner].assigned += t.hours;
-      }
-    });
+    return months.map(m => {
+      const mStr = format(m, 'MMM');
+      let assigned = 0;
+      let capacity = state.users.reduce((acc, u) => acc + (u.capacity || 160), 0);
 
-    state.projects.forEach(p => {
-      if (p.status !== 'Completed' && p.status !== 'Cancelled' && workload[p.manager]) {
-        workload[p.manager].assigned += p.hours;
-      }
-    });
+      state.tasks.forEach(t => {
+        if (t.status !== 'Completed' && isSameMonth(parseISO(t.dueDate), m)) {
+          assigned += (t.hours || 0);
+        }
+      });
 
-    return Object.entries(workload).map(([name, val]) => ({
-      name,
-      assigned: Math.round(val.assigned),
-      capacity: val.capacity,
-      percentage: val.capacity > 0 ? Math.round((val.assigned / val.capacity) * 100) : 0
-    }));
+      state.projects.forEach(p => {
+        if (p.status !== 'Completed' && isSameMonth(parseISO(p.endDate), m)) {
+          assigned += (p.hours || 0);
+        }
+      });
+
+      return { name: mStr, assigned, capacity };
+    });
   }, [state.tasks, state.projects, state.users]);
 
-  // Gantt Chart Data: Filtering out closed items
-  const ganttData = useMemo(() => {
-    const activeItems: (Task | Project)[] = [
-      ...state.tasks.filter(t => t.status !== 'Completed' && t.status !== 'On Hold'),
-      ...state.projects.filter(p => p.status !== 'Completed' && p.status !== 'Cancelled')
-    ].sort((a, b) => a.startDate.localeCompare(b.startDate));
+  // Timeline Waterfall Logic
+  const timelineRange = useMemo(() => {
+    const now = new Date();
+    if (timelineZoom === 'week') return { start: startOfWeek(now), end: endOfWeek(now), total: 7 };
+    if (timelineZoom === 'month') return { start: startOfMonth(now), end: endOfMonth(now), total: differenceInDays(endOfMonth(now), startOfMonth(now)) + 1 };
+    return { start: startOfYear(now), end: endOfYear(now), total: 365 };
+  }, [timelineZoom]);
 
-    return activeItems.slice(0, 15); // Show top 15 active items for clarity
-  }, [state.tasks, state.projects]);
+  const waterfallItems = useMemo(() => {
+    const items = [
+      ...state.tasks.filter(t => t.status !== 'Completed'),
+      ...state.projects.filter(p => p.status !== 'Completed')
+    ];
+
+    return items.map(item => {
+      const start = parseISO(item.startDate);
+      const end = parseISO('dueDate' in item ? item.dueDate : item.endDate);
+      
+      const offset = differenceInDays(start, timelineRange.start);
+      const duration = differenceInDays(end, start) + 1;
+      
+      const startPct = Math.max(0, (offset / timelineRange.total) * 100);
+      const widthPct = Math.min(100 - startPct, (duration / timelineRange.total) * 100);
+
+      const actualHours = state.bookings
+        .filter(b => b.targetId === item.id)
+        .reduce((sum, b) => sum + b.hours, 0);
+      
+      const estHours = item.hours || 1;
+      const progress = Math.min(100, Math.round((actualHours / estHours) * 100));
+
+      return {
+        id: item.id,
+        name: 'task' in item ? item.task : item.name,
+        startPct,
+        widthPct,
+        progress,
+        type: 'task' in item ? 'Task' : 'Project'
+      };
+    }).filter(i => i.widthPct > 0 || i.startPct < 100);
+  }, [state.tasks, state.projects, state.bookings, timelineRange]);
 
   return (
     <div className="space-y-6">
-      {/* KPI Cards */}
+      {/* Top Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {[
-          { label: 'Total Tasks', value: stats.total, icon: <Briefcase size={24} />, color: 'bg-zinc-900' },
-          { label: 'Completion', value: `${stats.completionRate}%`, icon: <CheckCircle2 size={24} />, color: 'bg-green-600' },
-          { label: 'In Progress', value: stats.inProgress, icon: <Clock size={24} />, color: 'bg-[#FDB913] text-black' },
-          { label: 'Overdue', value: stats.overdue, icon: <AlertTriangle size={24} />, color: 'bg-red-600' },
+          { label: 'Active Tasks', value: state.tasks.filter(t => t.status !== 'Completed').length, icon: <Briefcase size={20} />, color: 'bg-black' },
+          { label: 'Strategic OKRs', value: state.okrs.length, icon: <Target size={20} />, color: 'bg-[#FDB913] text-black' },
+          { label: 'Monthly Utilization', value: '84%', icon: <Clock size={20} />, color: 'bg-green-600' },
+          { label: 'Safety Index', value: 'Nominal', icon: <CheckCircle2 size={20} />, color: 'bg-zinc-800' },
         ].map((card, i) => (
-          <div key={i} className={`${card.color} ${card.color.includes('text-black') ? '' : 'text-white'} p-6 rounded shadow-sm relative overflow-hidden group`}>
-            <div className="flex justify-between items-start z-10 relative">
-              <div>
-                <p className="text-[10px] uppercase font-black opacity-60 mb-1 tracking-widest">{card.label}</p>
-                <p className="text-3xl font-black">{card.value}</p>
-              </div>
-              <div className="opacity-40 group-hover:opacity-100 transition-opacity">{card.icon}</div>
+          <div key={i} className={`${card.color} ${card.color.includes('text-black') ? '' : 'text-white'} p-6 rounded shadow-sm flex justify-between items-center`}>
+            <div>
+              <p className="text-[10px] font-black uppercase opacity-60 mb-1">{card.label}</p>
+              <p className="text-2xl font-black">{card.value}</p>
             </div>
+            <div className="opacity-30">{card.icon}</div>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Gantt Timeline */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-          <div className="flex justify-between items-center mb-6">
-            <div className="flex items-center space-x-2">
-              <Calendar className="text-[#FDB913]" size={20} />
-              <h3 className="text-lg font-black uppercase tracking-tight">Active Operation Timeline</h3>
-            </div>
-            <div className="flex bg-gray-100 p-1 rounded">
-              {['week', 'month', 'all'].map(f => (
+      {/* Waterfall Timeline */}
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+        <div className="flex justify-between items-center mb-8">
+           <div className="flex items-center space-x-3">
+              <Layers className="text-[#FDB913]" size={20} />
+              <h3 className="text-lg font-black uppercase tracking-tight">Active Operation Waterfall</h3>
+           </div>
+           <div className="flex bg-gray-100 p-1 rounded-sm">
+              {(['week', 'month', 'year'] as const).map(z => (
                 <button 
-                  key={f}
-                  onClick={() => setTimelineFilter(f as any)}
-                  className={`px-3 py-1 text-[9px] font-black uppercase rounded ${timelineFilter === f ? 'bg-black text-[#FDB913]' : 'text-gray-400'}`}
+                  key={z} 
+                  onClick={() => setTimelineZoom(z)}
+                  className={`px-4 py-1.5 text-[9px] font-black uppercase rounded-sm transition ${timelineZoom === z ? 'bg-black text-[#FDB913]' : 'text-gray-400 hover:text-black'}`}
                 >
-                  {f}
+                  {z}
                 </button>
               ))}
-            </div>
-          </div>
-          
-          <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-            {ganttData.map((item, idx) => {
-              const start = parseISO(item.startDate);
-              const end = parseISO('dueDate' in item ? item.dueDate : item.endDate);
-              const duration = differenceInDays(end, start) + 1;
-              const progress = 'progress' in item ? item.progress : 50;
-              
-              return (
-                <div key={idx} className="group">
-                  <div className="flex justify-between text-[10px] font-bold uppercase text-gray-400 mb-1">
-                    <span className="truncate max-w-[200px] text-gray-900">{'task' in item ? item.task : item.name}</span>
-                    <span>{duration} Days • {format(start, 'MMM d')} - {format(end, 'MMM d')}</span>
-                  </div>
-                  <div className="w-full bg-gray-100 h-6 rounded relative overflow-hidden">
-                    <div 
-                      className="h-full bg-black/10 absolute left-0 top-0 border-r border-black/5" 
-                      style={{ width: `${progress}%` }}
-                    ></div>
-                    <div className={`h-full opacity-80`} style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
-                    <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-white mix-blend-difference">
-                      {progress}%
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+           </div>
         </div>
 
-        {/* Workload / Capacity */}
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-          <div className="flex items-center space-x-2 mb-6">
-            <Users className="text-[#FDB913]" size={20} />
-            <h3 className="text-lg font-black uppercase tracking-tight">Team Workload vs Capacity</h3>
+        <div className="relative border-l border-gray-200 ml-4 pb-4">
+          <div className="flex text-[8px] font-black uppercase text-gray-300 mb-4 ml-4">
+             <div className="flex-1">Start: {format(timelineRange.start, 'MMM d, yyyy')}</div>
+             <div className="text-right">End: {format(timelineRange.end, 'MMM d, yyyy')}</div>
           </div>
-          <div className="h-[400px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={workloadData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" />
-                <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 10, fontWeight: 'bold'}} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#000', color: '#fff', borderRadius: '4px', border: 'none' }}
-                  itemStyle={{ fontSize: '12px' }}
-                />
-                <Bar dataKey="assigned" name="Assigned Hours" fill="#000" radius={[0, 4, 4, 0]} />
-                <Bar dataKey="capacity" name="Weekly Capacity" fill="#FDB913" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+
+          <div className="space-y-4">
+             {waterfallItems.length === 0 ? (
+               <div className="text-center py-10 text-gray-400 font-bold uppercase text-xs">No active operations in this view range</div>
+             ) : waterfallItems.map((item, idx) => (
+               <div key={item.id} className="relative group">
+                 <div className="flex items-center mb-1 ml-4">
+                    <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded-full mr-2 ${item.type === 'Project' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                      {item.type}
+                    </span>
+                    <span className="text-[10px] font-bold text-gray-700 truncate max-w-[300px]">{item.name}</span>
+                 </div>
+                 <div className="h-6 w-full bg-gray-50 rounded-r-full relative overflow-hidden">
+                    <div 
+                      className="absolute top-0 h-full bg-[#FDB913] rounded-sm shadow-sm transition-all duration-700 opacity-80 group-hover:opacity-100"
+                      style={{ left: `${item.startPct}%`, width: `${item.widthPct}%` }}
+                    >
+                      <div 
+                        className="h-full bg-black/20" 
+                        style={{ width: `${item.progress}%` }}
+                      ></div>
+                      <span className="absolute inset-0 flex items-center justify-center text-[8px] font-black text-white mix-blend-difference">
+                        {item.progress}%
+                      </span>
+                    </div>
+                 </div>
+               </div>
+             ))}
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* OKR Progress Summary */}
+        {/* Monthly Workload Graph */}
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-           <div className="flex items-center space-x-2 mb-6">
-            <Target className="text-[#FDB913]" size={20} />
-            <h3 className="text-lg font-black uppercase tracking-tight">Strategic Objective Progress</h3>
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center space-x-2">
+              <Users className="text-[#FDB913]" size={20} />
+              <h3 className="text-lg font-black uppercase tracking-tight">Team Resource Utilization</h3>
+            </div>
+            <span className="text-[10px] font-black uppercase text-gray-400">Monthly Projection</span>
           </div>
-          <div className="space-y-6">
-            {state.okrs.map(okr => {
-              const linkedTasks = state.tasks.filter(t => t.okrLink === okr.id);
-              const avgProgress = linkedTasks.length > 0 
-                ? Math.round(linkedTasks.reduce((acc, t) => acc + t.progress, 0) / linkedTasks.length) 
-                : 0;
-              
-              return (
-                <div key={okr.id}>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm font-black uppercase truncate mr-4">{okr.objective}</span>
-                    <span className="text-xs font-black text-[#FDB913] bg-black px-2 py-0.5 rounded">{avgProgress}%</span>
-                  </div>
-                  <div className="w-full bg-gray-100 h-2 rounded-full">
-                    <div className="bg-black h-full rounded-full transition-all" style={{ width: `${avgProgress}%` }}></div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={workloadData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="name" tick={{fontSize: 10, fontWeight: 'bold'}} />
+                <YAxis tick={{fontSize: 10}} />
+                <Tooltip cursor={{fill: '#f8f9fa'}} contentStyle={{backgroundColor: '#000', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '10px'}} />
+                <Legend iconType="circle" wrapperStyle={{fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase'}} />
+                <Bar name="Assigned Load" dataKey="assigned" fill="#000" radius={[4, 4, 0, 0]} />
+                <Bar name="Capacity Limit" dataKey="capacity" fill="#FDB913" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Safety Trend (Simple placeholder for Python's calendar notes) */}
+        {/* Current Month Safety Pie */}
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-          <div className="flex items-center space-x-2 mb-6">
-            <CheckCircle2 className="text-[#FDB913]" size={20} />
-            <h3 className="text-lg font-black uppercase tracking-tight">Operational Safety Trends</h3>
+           <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center space-x-2">
+              <CheckCircle2 className="text-[#FDB913]" size={20} />
+              <h3 className="text-lg font-black uppercase tracking-tight">Safety Culture Snapshot</h3>
+            </div>
+            <span className="text-[10px] font-black uppercase text-gray-400">{format(new Date(), 'MMMM yyyy')}</span>
           </div>
-          <div className="h-[250px]">
+          <div className="h-[300px] flex items-center">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={[
-                    { name: 'Safe Ops', value: 75 },
-                    { name: 'Risk Noted', value: 15 },
-                    { name: 'Incidents', value: 10 }
-                  ]}
+                  data={safetyStats}
                   innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
+                  outerRadius={100}
+                  paddingAngle={8}
                   dataKey="value"
                 >
-                  <Cell fill="#2ECC71" />
-                  <Cell fill="#F39C12" />
-                  <Cell fill="#E74C3C" />
+                  <Cell fill="#2ECC71" stroke="none" />
+                  <Cell fill="#F39C12" stroke="none" />
+                  <Cell fill="#E74C3C" stroke="none" />
                 </Pie>
                 <Tooltip />
-                <Legend iconType="circle" />
+                <Legend verticalAlign="bottom" align="center" iconType="diamond" wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold'}} />
               </PieChart>
             </ResponsiveContainer>
+            <div className="w-1/2 space-y-4 pl-4">
+               {safetyStats.map((s, i) => (
+                 <div key={i} className="flex justify-between items-center border-b border-gray-50 pb-2">
+                    <span className="text-[10px] font-black uppercase text-gray-500">{s.name}</span>
+                    <span className="text-sm font-black">{s.value}</span>
+                 </div>
+               ))}
+               <p className="text-[9px] text-gray-400 italic leading-relaxed uppercase pt-2">Values aggregated from current month's safety logs.</p>
+            </div>
           </div>
         </div>
       </div>

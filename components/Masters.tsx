@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { User } from '../types';
-import { Users, Tag, Plus, Trash2, Clock } from 'lucide-react';
+import { Users, Tag, Plus, Trash2, Clock, ShieldCheck } from 'lucide-react';
 
 interface MastersProps {
   users: User[];
@@ -12,19 +12,13 @@ interface MastersProps {
 
 const Masters: React.FC<MastersProps> = ({ users, categories, updateUsers, updateCategories }) => {
   const [newUserName, setNewUserName] = useState('');
-  const [newUserCap, setNewUserCap] = useState(40);
+  const [newUserCap, setNewUserCap] = useState(160);
   const [newCat, setNewCat] = useState('');
 
   const addUser = () => {
     if (newUserName.trim()) {
       updateUsers([...users, { name: newUserName.trim(), capacity: newUserCap }]);
       setNewUserName('');
-    }
-  };
-
-  const deleteUser = (name: string) => {
-    if (confirm(`Remove stakeholder ${name}?`)) {
-      updateUsers(users.filter(u => u.name !== name));
     }
   };
 
@@ -60,7 +54,7 @@ const Masters: React.FC<MastersProps> = ({ users, categories, updateUsers, updat
             />
           </div>
           <div>
-            <label className="block text-[10px] font-black uppercase text-gray-400 mb-1">Weekly Capacity (Hrs)</label>
+            <label className="block text-[10px] font-black uppercase text-gray-400 mb-1">Monthly Capacity (Hrs)</label>
             <input
               type="number"
               className="w-full border p-2 rounded text-sm font-bold outline-none"
@@ -76,9 +70,9 @@ const Masters: React.FC<MastersProps> = ({ users, categories, updateUsers, updat
             <div key={u.name} className="flex justify-between items-center p-4 bg-gray-50 rounded border border-transparent hover:border-[#FDB913]/20 group transition cursor-default">
               <div>
                 <span className="font-black text-gray-700 text-sm uppercase tracking-tight block leading-none">{u.name}</span>
-                <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Capacity: {u.capacity}h/wk</span>
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Capacity: {u.capacity}h/mo</span>
               </div>
-              <button onClick={() => deleteUser(u.name)} className="text-red-500 opacity-0 group-hover:opacity-100 transition p-2"><Trash2 size={16} /></button>
+              <button onClick={() => updateUsers(users.filter(x => x.name !== u.name))} className="text-red-500 opacity-0 group-hover:opacity-100 transition p-2"><Trash2 size={16} /></button>
             </div>
           ))}
         </div>
