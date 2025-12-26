@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Task, Status, Priority, OKR, Booking } from '../types';
-import { Plus, Trash2, Search, Target, Clock, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, Search, Target, Clock, AlertTriangle, ListChecks, History } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 interface TaskBoardProps {
@@ -43,8 +43,8 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
       project: formData.get('project') as string,
       status: formData.get('status') as Status,
       priority: formData.get('priority') as Priority,
-      progress: parseInt(formData.get('progress') as string),
-      hours: parseFloat(formData.get('hours') as string),
+      progress: tempProgress,
+      hours: parseFloat(formData.get('hours') as string) || 0,
       startDate: formData.get('startDate') as string,
       dueDate: formData.get('dueDate') as string,
       okrLink: formData.get('okrLink') as string,
@@ -54,13 +54,13 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
     if (editingTask) {
       const history = [...(editingTask.history || [])];
       if (editingTask.status !== taskData.status) {
-        history.push({ timestamp: new Date().toISOString(), change: `Status changed to ${taskData.status}` });
+        history.push({ timestamp: new Date().toISOString(), change: `Status transitioned to ${taskData.status}` });
       }
       updateTasks(tasks.map(t => t.id === editingTask.id ? { ...t, ...taskData, history } : t));
     } else {
       const newTask: Task = {
         id: Math.random().toString(36).substr(2, 9),
-        history: [{ timestamp: new Date().toISOString(), change: 'Task initiated' }],
+        history: [{ timestamp: new Date().toISOString(), change: 'Operation initialized' }],
         comments: [],
         ...taskData as any
       };
@@ -84,71 +84,75 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
     }
   };
 
-  const openInit = (task: Task | null) => {
+  const openEdit = (task: Task | null) => {
     setEditingTask(task);
     setTempProgress(task ? task.progress : 0);
     setActiveSubTab('details');
     setShowModal(true);
-  }
+  };
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap justify-between items-center gap-4 bg-white p-4 rounded shadow-sm border border-gray-100">
+      <div className="flex flex-wrap justify-between items-center gap-4 bg-white p-5 rounded shadow-sm border border-gray-100">
         <div className="flex items-center space-x-4 flex-1 max-w-2xl">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input type="text" placeholder="Filter tasks..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded text-sm outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+            <input type="text" placeholder="Search operations..." className="w-full pl-10 pr-4 py-3 border border-zinc-100 bg-zinc-50 rounded font-bold text-sm outline-none focus:bg-white focus:ring-1 focus:ring-black transition" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
           </div>
-          <select className="border border-gray-200 rounded px-3 py-2 text-xs font-black uppercase" value={filterOwner} onChange={(e) => setFilterOwner(e.target.value)}>
-            <option value="All">All People</option>
+          <select className="border border-zinc-100 bg-zinc-50 rounded px-4 py-3 text-xs font-black uppercase tracking-widest outline-none" value={filterOwner} onChange={(e) => setFilterOwner(e.target.value)}>
+            <option value="All">All Stakeholders</option>
             {users.map(u => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
         {!readOnly && (
-          <button onClick={() => openInit(null)} className="bg-black text-[#FDB913] px-6 py-2 rounded font-black text-xs uppercase tracking-widest shadow-lg">Initiate Operation</button>
+          <button onClick={() => openEdit(null)} className="bg-black text-[#FDB913] px-8 py-3 rounded font-black text-xs uppercase tracking-widest shadow-xl transition hover:brightness-110">Initiate New Operation</button>
         )}
       </div>
 
       <div className="bg-white rounded shadow-sm border border-gray-100 overflow-hidden">
         <table className="w-full text-left">
-          <thead className="bg-gray-50 border-b border-gray-200">
+          <thead className="bg-zinc-50 border-b border-gray-100">
             <tr>
-              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Operation Detail</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Stakeholder</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Duration (Est)</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Efficiency</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest text-right">Progress</th>
+              <th className="px-6 py-5 text-[10px] font-black uppercase text-gray-400 tracking-widest">Operation Detail</th>
+              <th className="px-6 py-5 text-[10px] font-black uppercase text-gray-400 tracking-widest">Stakeholder</th>
+              <th className="px-6 py-5 text-[10px] font-black uppercase text-gray-400 tracking-widest">Duration (Est)</th>
+              <th className="px-6 py-5 text-[10px] font-black uppercase text-gray-400 tracking-widest">Burn Efficiency</th>
+              <th className="px-6 py-5 text-[10px] font-black uppercase text-gray-400 tracking-widest text-right">Progress</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
-            {filteredTasks.map(t => {
+          <tbody className="divide-y divide-gray-50">
+            {filteredTasks.length === 0 ? (
+              <tr><td colSpan={5} className="px-6 py-12 text-center text-gray-300 font-black uppercase text-xs tracking-widest">No matching operations found</td></tr>
+            ) : filteredTasks.map(t => {
               const actual = getActualHours(t.id);
               const est = t.hours || 0;
               const burnPct = est > 0 ? Math.min(100, (actual / est) * 100) : 0;
               
               return (
-                <tr key={t.id} className="hover:bg-gray-50/50 transition group cursor-pointer" onClick={() => openInit(t)}>
-                  <td className="px-6 py-4">
-                    <p className="font-bold text-gray-800 text-sm">{t.task}</p>
-                    <div className="flex items-center space-x-2 mt-1">
-                      <span className="text-[9px] font-black uppercase bg-gray-100 px-2 py-0.5 rounded">{t.category}</span>
+                <tr key={t.id} className="hover:bg-zinc-50 transition group cursor-pointer" onClick={() => openEdit(t)}>
+                  <td className="px-6 py-5">
+                    <p className="font-black text-zinc-900 text-sm leading-tight mb-1">{t.task}</p>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-[8px] font-black uppercase bg-zinc-100 text-zinc-500 px-2 py-0.5 rounded tracking-tighter">{t.category}</span>
                       <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${getStatusColor(t.status)}`}>{t.status}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-xs font-bold text-gray-700">{t.owner}</td>
-                  <td className="px-6 py-4 text-xs font-black text-gray-500">{est} Hrs</td>
-                  <td className="px-6 py-4">
+                  <td className="px-6 py-5 text-xs font-black text-zinc-700 uppercase">{t.owner}</td>
+                  <td className="px-6 py-5 text-xs font-black text-zinc-900">{est} Hrs</td>
+                  <td className="px-6 py-5">
                     <div className="flex items-center space-x-3">
-                       <div className="w-20 bg-gray-100 h-1 rounded-full overflow-hidden">
+                       <div className="w-24 bg-zinc-100 h-1.5 rounded-full overflow-hidden">
                           <div className={`h-full ${actual > est && est > 0 ? 'bg-red-500' : 'bg-[#FDB913]'}`} style={{ width: `${burnPct}%` }}></div>
                        </div>
-                       <span className="text-[10px] font-black uppercase text-gray-400">{actual}h Logged</span>
+                       <span className="text-[10px] font-black uppercase text-gray-400">{actual}h Actual</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-right">
+                  <td className="px-6 py-5 text-right">
                     <div className="flex flex-col items-end">
-                      <span className="text-xs font-black text-gray-900">{t.progress}%</span>
-                      <div className="w-24 bg-gray-100 h-1 rounded-full mt-1"><div className="bg-black h-1 rounded-full" style={{ width: `${t.progress}%` }}></div></div>
+                      <span className="text-xs font-black text-zinc-900">{t.progress}%</span>
+                      <div className="w-24 bg-zinc-100 h-1.5 rounded-full mt-1.5">
+                        <div className="bg-black h-1.5 rounded-full transition-all duration-1000" style={{ width: `${t.progress}%` }}></div>
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -161,72 +165,85 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="p-6 bg-[#FDB913] text-black flex justify-between items-center shrink-0">
-              <h2 className="text-xl font-black uppercase tracking-tight">{editingTask ? 'Edit Operation' : 'Initiate New Operation'}</h2>
-              <button onClick={() => setShowModal(false)} className="font-black text-2xl">×</button>
+            <div className="p-8 bg-[#FDB913] text-black flex justify-between items-center shrink-0">
+              <div>
+                <h2 className="text-2xl font-black uppercase tracking-tight">{editingTask ? 'Edit Operation' : 'Initiate Operation'}</h2>
+                <p className="text-[10px] font-black uppercase opacity-60">Epiroc Management Console</p>
+              </div>
+              <button onClick={() => setShowModal(false)} className="font-black text-3xl hover:rotate-90 transition-all duration-300">×</button>
             </div>
             
-            <div className="flex bg-gray-50 border-b shrink-0">
-              <button onClick={() => setActiveSubTab('details')} className={`px-8 py-3 text-[10px] font-black uppercase tracking-widest ${activeSubTab === 'details' ? 'border-b-2 border-black bg-white' : 'text-gray-400'}`}>Operational Parameters</button>
+            <div className="flex bg-zinc-50 border-b shrink-0 px-8">
+              <button onClick={() => setActiveSubTab('details')} className={`px-8 py-4 text-[11px] font-black uppercase tracking-widest flex items-center space-x-2 ${activeSubTab === 'details' ? 'border-b-4 border-black text-black bg-white' : 'text-gray-400 hover:text-black'}`}>
+                <ListChecks size={14} />
+                <span>Operational Parameters</span>
+              </button>
               {editingTask && (
-                <button onClick={() => setActiveSubTab('history')} className={`px-8 py-3 text-[10px] font-black uppercase tracking-widest ${activeSubTab === 'history' ? 'border-b-2 border-black bg-white' : 'text-gray-400'}`}>System Audit Log</button>
+                <button onClick={() => setActiveSubTab('history')} className={`px-8 py-4 text-[11px] font-black uppercase tracking-widest flex items-center space-x-2 ${activeSubTab === 'history' ? 'border-b-4 border-black text-black bg-white' : 'text-gray-400 hover:text-black'}`}>
+                  <History size={14} />
+                  <span>Audit Trail</span>
+                </button>
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-8 bg-white">
               {activeSubTab === 'details' ? (
-                <form id="taskForm" onSubmit={handleSaveTask} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <form id="taskForm" onSubmit={handleSaveTask} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="col-span-2">
-                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Task Description *</label>
-                      <input name="task" required defaultValue={editingTask?.task} className="w-full border p-3 rounded font-bold" readOnly={readOnly} />
+                      <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Operational Description *</label>
+                      <input name="task" required defaultValue={editingTask?.task} className="w-full border-b-2 border-zinc-100 p-3 bg-zinc-50 text-lg font-black outline-none focus:border-[#FDB913] focus:bg-white transition" readOnly={readOnly} />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Stakeholder *</label>
-                      <select name="owner" required defaultValue={editingTask?.owner} className="w-full border p-2 rounded" disabled={readOnly}>
+                      <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Stakeholder Owner *</label>
+                      <select name="owner" required defaultValue={editingTask?.owner} className="w-full border p-3 rounded font-bold outline-none" disabled={readOnly}>
                         {users.map(u => <option key={u} value={u}>{u}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Estimated Duration (Hrs)</label>
-                      <input type="number" step="0.5" name="hours" defaultValue={editingTask?.hours || 0} className="w-full border p-2 rounded font-black text-zinc-900" readOnly={readOnly} placeholder="e.g. 12.5" />
+                      <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Estimated Duration (Total Hrs)</label>
+                      <input type="number" step="0.5" name="hours" defaultValue={editingTask?.hours || 0} className="w-full border p-3 rounded font-black text-zinc-900 outline-none" readOnly={readOnly} placeholder="e.g. 40" />
                     </div>
                     <div>
-                       <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Operation Status</label>
-                       <select name="status" defaultValue={editingTask?.status || 'Not Started'} className="w-full border p-2 rounded" disabled={readOnly}>
+                       <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Operational Status</label>
+                       <select name="status" defaultValue={editingTask?.status || 'Not Started'} className="w-full border p-3 rounded font-black outline-none" disabled={readOnly}>
                           {['Not Started', 'In Progress', 'Completed', 'Blocked', 'On Hold'].map(s => <option key={s} value={s}>{s}</option>)}
                        </select>
                     </div>
                     <div>
-                       <div className="flex justify-between items-center mb-1">
-                          <label className="block text-[10px] font-black uppercase text-gray-500 tracking-widest">Target Progress</label>
-                          <span className="text-xs font-black text-[#FDB913] bg-black px-2 py-0.5 rounded">{tempProgress}%</span>
+                       <div className="flex justify-between items-center mb-2">
+                          <label className="block text-[10px] font-black uppercase text-gray-400 tracking-widest">Target Progress (%)</label>
+                          <span className="text-[11px] font-black text-white bg-black px-3 py-1 rounded-full">{tempProgress}%</span>
                        </div>
-                       <input type="range" name="progress" min="0" max="100" value={tempProgress} onChange={(e) => setTempProgress(parseInt(e.target.value))} className="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black mt-2" disabled={readOnly} />
+                       <input type="range" name="progress" min="0" max="100" value={tempProgress} onChange={(e) => setTempProgress(parseInt(e.target.value))} className="w-full h-2 bg-zinc-100 rounded-lg appearance-none cursor-pointer accent-[#FDB913] mt-2" disabled={readOnly} />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Deployment Date</label>
-                      <input type="date" name="startDate" defaultValue={editingTask?.startDate} className="w-full border p-2 rounded" readOnly={readOnly} />
+                      <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Start Date</label>
+                      <input type="date" name="startDate" defaultValue={editingTask?.startDate} className="w-full border p-3 rounded font-bold outline-none" readOnly={readOnly} />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Target Delivery Date</label>
-                      <input type="date" name="dueDate" defaultValue={editingTask?.dueDate} className="w-full border p-2 rounded" readOnly={readOnly} />
+                      <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Delivery Date</label>
+                      <input type="date" name="dueDate" defaultValue={editingTask?.dueDate} className="w-full border p-3 rounded font-bold outline-none" readOnly={readOnly} />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Strategic OKR Link</label>
-                      <select name="okrLink" defaultValue={editingTask?.okrLink} className="w-full border p-2 rounded" disabled={readOnly}>
-                        <option value="">No Strategic Connection</option>
-                        {okrs.map(o => <option key={o.id} value={o.id}>{o.objective}</option>)}
+                      <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Taxonomy Category</label>
+                      <select name="category" defaultValue={editingTask?.category} className="w-full border p-3 rounded font-bold outline-none" disabled={readOnly}>
+                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                     </div>
                   </div>
                 </form>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-6">
                   {editingTask?.history?.map((entry, idx) => (
-                    <div key={idx} className="flex space-x-4">
-                      <div className="w-24 shrink-0 text-[9px] font-black text-gray-400 mt-1 uppercase leading-none">{format(parseISO(entry.timestamp), 'MMM d, HH:mm')}</div>
-                      <div className="flex-1 pb-4 border-l-2 border-gray-100 pl-6 relative"><div className="absolute w-2 h-2 rounded-full bg-black -left-1.5 top-0.5"></div><p className="text-xs font-black text-gray-800 uppercase tracking-tight">{entry.change}</p></div>
+                    <div key={idx} className="flex space-x-6">
+                      <div className="w-28 shrink-0 text-[10px] font-black text-gray-400 mt-1 uppercase tracking-tighter">
+                        {format(parseISO(entry.timestamp), 'MMM d, HH:mm')}
+                      </div>
+                      <div className="flex-1 pb-6 border-l-2 border-zinc-100 pl-8 relative">
+                         <div className="absolute w-3 h-3 rounded-full bg-black -left-[7px] top-0 border-4 border-white"></div>
+                         <p className="text-xs font-black text-zinc-800 uppercase tracking-tight">{entry.change}</p>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -234,9 +251,9 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
             </div>
 
             {!readOnly && (
-              <div className="p-6 border-t bg-gray-50 flex justify-end items-center shrink-0 space-x-3">
-                  <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2 text-[10px] font-black uppercase">Close</button>
-                  <button type="submit" form="taskForm" className="px-8 py-3 bg-black text-[#FDB913] rounded font-black uppercase tracking-widest shadow-xl">Commit Operation</button>
+              <div className="p-8 border-t bg-zinc-50 flex justify-end items-center shrink-0 space-x-4">
+                  <button type="button" onClick={() => setShowModal(false)} className="px-8 py-3 text-[11px] font-black uppercase tracking-widest text-zinc-400 hover:text-black transition">Cancel</button>
+                  <button type="submit" form="taskForm" className="px-12 py-4 bg-black text-[#FDB913] rounded-full font-black uppercase text-xs tracking-widest shadow-2xl transition hover:brightness-110">Commit Operation</button>
               </div>
             )}
           </div>

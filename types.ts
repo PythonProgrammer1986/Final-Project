@@ -52,9 +52,9 @@ export interface Project {
   endDate: string;
   hours: number; // Estimated hours
   description: string;
+  progress?: number;
 }
 
-// Added Activity interface to fix import error in ActivityTracker.tsx
 export interface Activity {
   id: string;
   date: string;
@@ -65,7 +65,6 @@ export interface Activity {
   remarks: string;
 }
 
-// Added KPI interface to fix import error in KPITracker.tsx
 export interface KPI {
   id: string;
   name: string;
@@ -112,6 +111,7 @@ export type SafetyStatusEntry = { status: 'green' | 'yellow' | 'red'; notes: str
 export type SafetyStatus = Record<string, SafetyStatusEntry>;
 
 export interface AppState {
+  version: string;
   tasks: Task[];
   projects: Project[];
   ideas: Idea[];
