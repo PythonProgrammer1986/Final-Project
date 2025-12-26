@@ -8,7 +8,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { AppState, Task, Project, User, Idea, Kudos, OKR, Booking } from './types';
-import { DEFAULT_USERS, DEFAULT_CATEGORIES, DEFAULT_AGENDA } from './constants';
+import { DEFAULT_USERS, DEFAULT_CATEGORIES, DEFAULT_AGENDA, BRAND } from './constants';
 import Dashboard from './components/Dashboard';
 import TaskBoard from './components/TaskBoard';
 import ProjectBoard from './components/ProjectBoard';
@@ -18,9 +18,10 @@ import KudosBoard from './components/KudosBoard';
 import OKRBoard from './components/OKRBoard';
 import Masters from './components/Masters';
 import HoursBooking from './components/HoursBooking';
+import { Logo } from './components/Logo';
 
 const STORAGE_KEY = 'epiroc_pulse_v5_final';
-const APP_VERSION = '5.5.0';
+const APP_VERSION = '5.7.1';
 
 const tabs = [
   { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
@@ -215,7 +216,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F8F9FA]">
+    <div className="min-h-screen flex flex-col bg-[#F8F9FA] relative">
       {needsBackupAuth && !isReadOnly && (
         <div className="bg-[#E74C3C] text-white py-2 px-8 flex items-center justify-between text-[11px] font-black uppercase tracking-widest z-[100] shadow-lg">
           <div className="flex items-center space-x-3">
@@ -229,31 +230,11 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Brand Header - epiroc yellow background as requested */}
-      <header className={`h-32 flex items-center px-8 relative overflow-hidden transition-colors duration-500 bg-[#FDB913] text-[#3d4d5b]`}>
+      {/* Brand Header */}
+      <header className="h-32 flex items-center px-8 relative overflow-hidden transition-colors duration-500 text-[#3d4d5b]" style={{ backgroundColor: BRAND.YELLOW }}>
         <div className="flex flex-col z-10">
-          {/* Epiroc Logo: Wordmark strictly as per attached image */}
           <div className="flex items-center">
-            <svg viewBox="0 0 500 120" className="h-20 w-auto" fill="#3D444F">
-              {/* Stylized 'e' inner cutout */}
-              <path d="M65 24L42 37V68L65 81L88 68V37L65 24ZM74 62L65 67L56 62V43L65 38L74 43V48L65 43V40L60 43V62L65 65L70 62V58H74V62Z" fill="#FDB913"/>
-              
-              {/* Wordmark reconstructed with paths for accuracy and consistency */}
-              <g transform="translate(130, 28)">
-                {/* E */}
-                <path d="M0 0H35V12H13V24H32V36H13V48H36V60H0V0Z"/>
-                {/* p */}
-                <path d="M48 18V76H60V62H61C64 67 69 70 75 70C86 70 95 61 95 44C95 27 86 18 75 18C69 18 64 21 61 26H60V18H48ZM72 30C78 30 82 34 82 44C82 54 78 58 72 58C66 58 62 54 62 44C62 34 66 30 72 30Z"/>
-                {/* i */}
-                <path d="M108 0H120V12H108V0ZM108 18H120V70H108V18Z"/>
-                {/* r */}
-                <path d="M133 18H145V28H146C148 22 153 18 160 18V31C154 31 148 34 146 39V70H133V18Z"/>
-                {/* o */}
-                <path d="M190 18C177 18 168 28 168 44C168 60 177 70 190 70C203 70 212 60 212 44C212 28 203 18 190 18ZM190 30C196 30 200 34 200 44C200 54 196 58 190 58C184 58 180 54 180 44C180 34 184 30 190 30Z"/>
-                {/* c */}
-                <path d="M255 38C253 33 249 30 243 30C237 30 233 35 233 44C233 53 237 58 243 58C249 58 253 55 255 50H268C265 62 255 70 243 70C229 70 220 60 220 44C220 28 229 18 243 18C255 18 265 26 268 38H255Z"/>
-              </g>
-            </svg>
+             <Logo />
           </div>
 
           {/* Operational Status below logo - only icons and minimal functional text */}
@@ -318,14 +299,14 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      <main className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
+      <main className="flex-1 p-6 max-w-[1600px] mx-auto w-full mb-8">
         {activeTab === 'dashboard' && <Dashboard state={data} />}
         {activeTab === 'calendar' && <CalendarView tasks={data.tasks} safetyStatus={data.safetyStatus} updateSafetyStatus={(newStatus) => updateData({ safetyStatus: newStatus })} />}
-        {activeTab === 'tasks' && <TaskBoard readOnly={isReadOnly} tasks={data.tasks} users={data.users.map(u => u.name)} categories={data.categories} projects={data.projects} okrs={data.okrs} bookings={data.bookings} updateTasks={(tasks) => updateData({ tasks })} />}
+        {activeTab === 'tasks' && <TaskBoard readOnly={isReadOnly} tasks={data.tasks} ideas={data.ideas} users={data.users.map(u => u.name)} categories={data.categories} projects={data.projects} okrs={data.okrs} bookings={data.bookings} updateTasks={(tasks) => updateData({ tasks })} />}
         {activeTab === 'projects' && <ProjectBoard projects={data.projects} users={data.users.map(u => u.name)} updateProjects={(projects) => updateData({ projects })} />}
         {activeTab === 'bookings' && <HoursBooking readOnly={isReadOnly} bookings={data.bookings} tasks={data.tasks} projects={data.projects} users={data.users.map(u => u.name)} updateBookings={(bookings) => updateData({ bookings })} />}
         {activeTab === 'okrs' && <OKRBoard okrs={data.okrs} tasks={data.tasks} updateOkrs={(okrs) => updateData({ okrs })} />}
-        {activeTab === 'ideas' && <IdeaMatrix ideas={data.ideas} users={data.users.map(u => u.name)} updateIdeas={(ideas) => updateData({ ideas })} />}
+        {activeTab === 'ideas' && <IdeaMatrix ideas={data.ideas} tasks={data.tasks} users={data.users.map(u => u.name)} updateIdeas={(ideas) => updateData({ ideas })} updateTasks={(tasks) => updateData({ tasks })} />}
         {activeTab === 'kudos' && <KudosBoard kudos={data.kudos} users={data.users.map(u => u.name)} updateKudos={(kudos) => updateData({ kudos })} />}
         {activeTab === 'masters' && (
           <div className="space-y-6">
@@ -349,6 +330,10 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      <footer className="fixed bottom-2 right-4 text-[9px] text-gray-300 font-mono pointer-events-none z-50 mix-blend-multiply">
+        Created by: Aditya Shitut
+      </footer>
     </div>
   );
 };

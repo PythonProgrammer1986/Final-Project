@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { OKR, Task } from '../types';
-import { Target, Plus, Trash2, ChevronDown, ListChecks } from 'lucide-react';
+import { Target, Plus, Trash2, ChevronDown, ListChecks, Edit2 } from 'lucide-react';
 
 interface OKRBoardProps {
   okrs: OKR[];
@@ -11,6 +11,7 @@ interface OKRBoardProps {
 
 const OKRBoard: React.FC<OKRBoardProps> = ({ okrs, tasks, updateOkrs }) => {
   const [showModal, setShowModal] = useState(false);
+  const [editingOkr, setEditingOkr] = useState<OKR | null>(null);
 
   const handleSaveOKR = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -21,14 +22,31 @@ const OKRBoard: React.FC<OKRBoardProps> = ({ okrs, tasks, updateOkrs }) => {
       kr: k.trim()
     }));
 
-    const newOKR: OKR = {
-      id: Math.random().toString(36).substr(2, 9),
-      objective: formData.get('objective') as string,
-      keyResults
-    };
-    updateOkrs([...okrs, newOKR]);
+    if (editingOkr) {
+        // Keep IDs of existing KRs if text matches to preserve potential links, or just simple replace for now.
+        // For simplicity in this version, we replace KRs. Ideally we'd reconcile.
+        const updatedOkr = {
+            ...editingOkr,
+            objective: formData.get('objective') as string,
+            keyResults: keyResults
+        };
+        updateOkrs(okrs.map(o => o.id === editingOkr.id ? updatedOkr : o));
+    } else {
+        const newOKR: OKR = {
+          id: Math.random().toString(36).substr(2, 9),
+          objective: formData.get('objective') as string,
+          keyResults
+        };
+        updateOkrs([...okrs, newOKR]);
+    }
     setShowModal(false);
+    setEditingOkr(null);
   };
+
+  const openEdit = (okr: OKR) => {
+      setEditingOkr(okr);
+      setShowModal(true);
+  }
 
   const deleteOKR = (id: string) => {
     if (confirm('Delete this strategic objective?')) {
@@ -49,7 +67,7 @@ const OKRBoard: React.FC<OKRBoardProps> = ({ okrs, tasks, updateOkrs }) => {
           </div>
         </div>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={() => { setEditingOkr(null); setShowModal(true); }}
           className="bg-[#FDB913] text-black px-6 py-2 rounded font-black text-xs uppercase tracking-widest shadow-lg hover:brightness-110"
         >
           Define New Objective
@@ -78,7 +96,10 @@ const OKRBoard: React.FC<OKRBoardProps> = ({ okrs, tasks, updateOkrs }) => {
                     <span className="text-xs font-black">{progress}% Completed</span>
                   </div>
                 </div>
-                <button onClick={() => deleteOKR(okr.id)} className="p-2 text-gray-300 hover:text-red-500 transition"><Trash2 size={18} /></button>
+                <div className="flex space-x-2">
+                    <button onClick={() => openEdit(okr)} className="p-2 text-gray-300 hover:text-blue-500 transition"><Edit2 size={18} /></button>
+                    <button onClick={() => deleteOKR(okr.id)} className="p-2 text-gray-300 hover:text-red-500 transition"><Trash2 size={18} /></button>
+                </div>
               </div>
               <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
                  <div className="space-y-4">
@@ -115,17 +136,24 @@ const OKRBoard: React.FC<OKRBoardProps> = ({ okrs, tasks, updateOkrs }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded shadow-2xl w-full max-w-xl overflow-hidden">
             <div className="p-6 bg-black text-[#FDB913] flex justify-between items-center">
-              <h2 className="text-xl font-black uppercase tracking-tight">Define Strategy</h2>
+              <h2 className="text-xl font-black uppercase tracking-tight">{editingOkr ? 'Edit Strategy' : 'Define Strategy'}</h2>
               <button onClick={() => setShowModal(false)} className="font-black text-2xl">×</button>
             </div>
             <form onSubmit={handleSaveOKR} className="p-6 space-y-4">
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1">High-Level Objective *</label>
-                <input name="objective" required className="w-full border p-3 rounded outline-none font-bold" placeholder="e.g. Increase Drill Rig Efficiency by 20%" />
+                <input name="objective" required defaultValue={editingOkr?.objective} className="w-full border p-3 rounded outline-none font-bold" placeholder="e.g. Increase Drill Rig Efficiency by 20%" />
               </div>
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1">Key Results (One per line) *</label>
-                <textarea name="keyResults" required className="w-full border p-3 rounded outline-none text-sm" rows={5} placeholder="e.g. Reduce setup time to 15 mins&#10;Zero hydraulic leaks recorded&#10;Team certification at 100%"></textarea>
+                <textarea 
+                    name="keyResults" 
+                    required 
+                    defaultValue={editingOkr?.keyResults.map(k => k.kr).join('\n')}
+                    className="w-full border p-3 rounded outline-none text-sm" 
+                    rows={5} 
+                    placeholder="e.g. Reduce setup time to 15 mins&#10;Zero hydraulic leaks recorded&#10;Team certification at 100%"
+                ></textarea>
               </div>
               <div className="pt-4 flex justify-end">
                 <button type="submit" className="bg-[#FDB913] text-black px-8 py-3 rounded font-black uppercase tracking-widest shadow-xl">Activate Strategic Goal</button>

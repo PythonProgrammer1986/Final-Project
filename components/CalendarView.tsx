@@ -24,8 +24,13 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
   };
 
   const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
-  // Fix: Replaced subMonths with addMonths negative value
   const prevMonth = () => setCurrentMonth(addMonths(currentMonth, -1));
+
+  const jumpToToday = () => {
+    const now = new Date();
+    setCurrentMonth(now);
+    setSelectedDate(now);
+  };
 
   const renderHeader = () => (
     <div className="flex justify-between items-center bg-white p-4 rounded-t-lg border-b border-gray-100">
@@ -34,7 +39,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
       </h2>
       <div className="flex items-center space-x-2">
         <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft size={20} /></button>
-        <button onClick={() => setCurrentMonth(new Date())} className="px-4 py-1 text-xs font-bold uppercase border border-gray-200 rounded hover:bg-gray-50">Today</button>
+        <button onClick={jumpToToday} className="px-4 py-1 text-xs font-bold uppercase border border-gray-200 rounded hover:bg-gray-50">Today</button>
         <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight size={20} /></button>
       </div>
     </div>
@@ -52,10 +57,8 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
   };
 
   const renderCells = () => {
-    // Fix: Replaced startOfMonth with native Date logic
     const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
     const monthEnd = endOfMonth(monthStart);
-    // Fix: Replaced startOfWeek with native Date logic
     const startDate = new Date(monthStart);
     startDate.setDate(startDate.getDate() - startDate.getDay());
     const endDate = endOfWeek(monthEnd);

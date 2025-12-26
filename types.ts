@@ -39,6 +39,8 @@ export interface Task {
   originalDueDate?: string;
   notes: string;
   okrLink?: string;
+  keyResultLink?: string; // Linked specific KR ID
+  ideaLink?: string;
   history: HistoryEntry[];
   comments: Comment[];
 }
@@ -52,7 +54,7 @@ export interface Project {
   endDate: string;
   hours: number; // Estimated hours
   description: string;
-  progress?: number;
+  progress?: number; // Manual % completion
 }
 
 export interface Activity {

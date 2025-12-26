@@ -8,25 +8,25 @@ import { AppState, Task, Project, SafetyStatusEntry } from '../types';
 import { BRAND } from '../constants';
 import { 
   Briefcase, CheckCircle2, Clock, AlertTriangle, 
-  Users, Target, Calendar, ZoomIn, ZoomOut, Layers
+  Users, Target, Calendar, ZoomIn, ZoomOut, Layers, Filter, CornerDownRight
 } from 'lucide-react';
 import { 
   format, differenceInDays, 
   endOfMonth, endOfYear, addMonths, eachMonthOfInterval,
   isSameMonth, endOfWeek, eachDayOfInterval, eachWeekOfInterval, 
-  addWeeks, isWithinInterval
+  addWeeks, isWithinInterval, addDays
 } from 'date-fns';
 
 const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
   const [timelineZoom, setTimelineZoom] = useState<'week' | 'month' | 'year'>('month');
   const [utilizationFilter, setUtilizationFilter] = useState<'week' | 'month' | 'year'>('month');
   const [stakeholderFilter, setStakeholderFilter] = useState('All');
+  const [waterfallMode, setWaterfallMode] = useState<'timeline' | 'hierarchy'>('timeline');
 
   // Safety Analytics Aggregation
   const safetyStats = useMemo(() => {
     const today = new Date();
     const currentMonthData = Object.entries(state.safetyStatus || {})
-      // Fix: Replaced parseISO with native Date constructor
       .filter(([date]) => isSameMonth(new Date(date), today));
     
     const statusCounts = { green: 0, yellow: 0, red: 0 };
@@ -42,69 +42,105 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
     ].filter(s => s.value > 0 || s.name === 'Safe Ops');
   }, [state.safetyStatus]);
 
-  // Enhanced Resource Utilization with Stakeholder Filtering
+  // Enhanced Resource Utilization with Accurate Daily-Rate Formulas
   const workloadData = useMemo(() => {
     const now = new Date();
     let intervals: Date[] = [];
     
+    // 1. Generate Time Intervals
     if (utilizationFilter === 'week') {
-      // Fix: Replaced subWeeks with addWeeks negative value
       intervals = eachWeekOfInterval({ start: addWeeks(now, -2), end: addWeeks(now, 5) });
     } else if (utilizationFilter === 'month') {
-      // Fix: Replaced startOfYear with native Date logic
       const yearStart = new Date(now.getFullYear(), 0, 1);
       intervals = eachMonthOfInterval({ start: yearStart, end: addMonths(yearStart, 11) });
     } else {
-      // Fix: Replaced startOfYear with native Date logic
       const yearStart = new Date(now.getFullYear(), 0, 1);
       intervals = [yearStart, new Date(now.getFullYear() + 1, 0, 1)];
     }
 
     return intervals.map(start => {
-      const label = utilizationFilter === 'week' ? `W${format(start, 'w')}` : format(start, 'MMM yy');
-      let assigned = 0;
-      
+      // 2. Determine Interval Boundaries
+      let end: Date;
+      let label: string;
+
+      if (utilizationFilter === 'week') {
+        end = addWeeks(start, 1);
+        label = `W${format(start, 'w')}`;
+      } else if (utilizationFilter === 'month') {
+        end = addMonths(start, 1);
+        label = format(start, 'MMM yy');
+      } else {
+        end = addMonths(start, 12);
+        label = format(start, 'yyyy');
+      }
+
+      const daysInInterval = differenceInDays(end, start);
+
+      // 3. Calculate Capacity (Daily Rate Basis)
       const filteredUsers = stakeholderFilter === 'All' 
         ? state.users 
         : state.users.filter(u => u.name === stakeholderFilter);
         
-      let totalCapacity = filteredUsers.reduce((acc, u) => acc + (u.capacity || 160), 0);
+      // Annualize monthly capacity to get a precise daily rate
+      // (Monthly * 12) / 365 = Daily Hours Available
+      const totalDailyCapacity = filteredUsers.reduce((acc, u) => acc + (u.capacity || 160), 0) * 12 / 365;
+      const intervalCapacity = totalDailyCapacity * daysInInterval;
 
-      // Projects calc distributed across timeline
+      let assigned = 0;
+
+      // 4. Calculate Project Load (Distributed over Duration)
       state.projects.forEach(p => {
-        if (p.status !== 'Completed' && p.status !== 'Cancelled') {
-          if (stakeholderFilter !== 'All' && p.manager !== stakeholderFilter) return;
-          
-          // Fix: Replaced parseISO with native Date constructor
-          const pStart = new Date(p.startDate);
-          const pEnd = new Date(p.endDate);
-          const intervalEnd = utilizationFilter === 'week' ? addWeeks(start, 1) : addMonths(start, 1);
-          
-          if (isWithinInterval(start, { start: pStart, end: pEnd }) || isWithinInterval(pStart, { start, end: intervalEnd })) {
-             const durationDays = differenceInDays(pEnd, pStart) || 1;
-             const hoursPerDay = (p.hours || 0) / durationDays;
-             assigned += hoursPerDay * (utilizationFilter === 'week' ? 7 : 30);
-          }
+        if (p.status === 'Completed' || p.status === 'Cancelled') return;
+        if (stakeholderFilter !== 'All' && p.manager !== stakeholderFilter) return;
+
+        const pStart = new Date(p.startDate);
+        const pEnd = new Date(p.endDate);
+        // Use exclusive end date for accurate duration math
+        const pEndExclusive = addDays(pEnd, 1);
+
+        // Determine overlap with current interval
+        const startOverlap = pStart > start ? pStart : start;
+        const endOverlap = pEndExclusive < end ? pEndExclusive : end;
+
+        if (startOverlap < endOverlap) {
+           const overlapDays = differenceInDays(endOverlap, startOverlap);
+           const totalProjectDays = Math.max(1, differenceInDays(pEndExclusive, pStart));
+           
+           // Daily burn rate = Total Est Hours / Total Days
+           const dailyLoad = (p.hours || 0) / totalProjectDays;
+           assigned += dailyLoad * overlapDays;
         }
       });
 
-      // Tasks calc on due date
+      // 5. Calculate Standalone Task Load (Distributed or Point Load)
       state.tasks.forEach(t => {
-        if (t.status !== 'Completed') {
-          if (stakeholderFilter !== 'All' && t.owner !== stakeholderFilter) return;
-          
-          // Fix: Replaced parseISO with native Date constructor
-          const tDate = new Date(t.dueDate);
-          if (utilizationFilter === 'month' && isSameMonth(tDate, start)) assigned += (t.hours || 0);
-          else if (utilizationFilter === 'week' && tDate >= start && tDate < addWeeks(start, 1)) assigned += (t.hours || 0);
-          else if (utilizationFilter === 'year' && tDate.getFullYear() === start.getFullYear()) assigned += (t.hours || 0);
+        if (t.status === 'Completed') return;
+        if (t.project) return; // Skip tasks linked to projects to avoid double counting (Project Est Hours is master)
+        if (stakeholderFilter !== 'All' && t.owner !== stakeholderFilter) return;
+
+        const tDue = new Date(t.dueDate);
+        const tStart = t.startDate ? new Date(t.startDate) : tDue; // Fallback to due date if no start
+        
+        // Sanity check dates
+        const validStart = tStart > tDue ? tDue : tStart;
+        const tEndExclusive = addDays(tDue, 1);
+
+        const startOverlap = validStart > start ? validStart : start;
+        const endOverlap = tEndExclusive < end ? tEndExclusive : end;
+
+        if (startOverlap < endOverlap) {
+            const overlapDays = differenceInDays(endOverlap, startOverlap);
+            const totalTaskDays = Math.max(1, differenceInDays(tEndExclusive, validStart));
+            
+            const dailyLoad = (t.hours || 0) / totalTaskDays;
+            assigned += dailyLoad * overlapDays;
         }
       });
 
       return { 
         name: label, 
         assigned: Math.round(assigned), 
-        capacity: utilizationFilter === 'week' ? Math.round(totalCapacity / 4) : totalCapacity 
+        capacity: Math.round(intervalCapacity) 
       };
     });
   }, [state.tasks, state.projects, state.users, utilizationFilter, stakeholderFilter]);
@@ -112,7 +148,6 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
   // Waterfall Range Tracking
   const timelineRange = useMemo(() => {
     const now = new Date();
-    // Fix: Replaced startOfWeek, startOfMonth, startOfYear with native Date logic to bypass import errors
     if (timelineZoom === 'week') {
       const start = new Date(now);
       start.setDate(start.getDate() - start.getDay());
@@ -131,11 +166,36 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
 
   // Waterfall Visualization Items
   const waterfallItems = useMemo(() => {
-    return [
-      ...state.tasks.filter(t => t.status !== 'Completed').map(t => ({...t, type: 'Task', name: t.task, end: t.dueDate})),
-      ...state.projects.filter(p => p.status !== 'Completed').map(p => ({...p, type: 'Project', name: p.name, end: p.endDate}))
-    ].map(item => {
-      // Fix: Replaced parseISO with native Date constructor
+    let rawItems = [];
+
+    if (waterfallMode === 'hierarchy') {
+        // Group by Project
+        const projects = state.projects.filter(p => p.status !== 'Completed');
+        projects.forEach(p => {
+            rawItems.push({...p, type: 'Project', name: p.name, end: p.endDate, progress: p.progress || 0}); 
+            // Find tasks linked to this project
+            const linkedTasks = state.tasks.filter(t => t.project === p.id && t.status !== 'Completed');
+            linkedTasks.forEach(t => {
+                rawItems.push({...t, type: 'Task', name: t.task, end: t.dueDate, isChild: true});
+            });
+        });
+        // Add orphaned tasks
+        const orphanTasks = state.tasks.filter(t => !t.project && t.status !== 'Completed');
+        orphanTasks.forEach(t => {
+             rawItems.push({...t, type: 'Task', name: t.task, end: t.dueDate});
+        });
+
+    } else {
+        // Flat timeline view
+        rawItems = [
+            ...state.tasks.filter(t => t.status !== 'Completed').map(t => ({...t, type: 'Task', name: t.task, end: t.dueDate})),
+            ...state.projects.filter(p => p.status !== 'Completed').map(p => ({...p, type: 'Project', name: p.name, end: p.endDate, progress: p.progress || 0}))
+        ];
+        // Sort by start date
+        rawItems.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+    }
+
+    return rawItems.map(item => {
       const start = new Date(item.startDate);
       const end = new Date(item.end);
       const offset = differenceInDays(start, timelineRange.start);
@@ -149,8 +209,8 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
         startPct: Math.max(0, Math.min(100, startPct)), 
         widthPct: Math.max(1, Math.min(100 - startPct, widthPct)) 
       };
-    }).filter(i => i.startPct < 100 && (i.startPct + i.widthPct) > 0);
-  }, [state.tasks, state.projects, timelineRange]);
+    }).filter(i => (i.startPct < 100 && (i.startPct + i.widthPct) > 0) || i.isChild);
+  }, [state.tasks, state.projects, timelineRange, waterfallMode]);
 
   // Timeline Ruler Tick Generation
   const rulerTicks = useMemo(() => {
@@ -195,10 +255,21 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Site Roadmap & Critical Path</p>
               </div>
            </div>
-           <div className="flex bg-zinc-100 p-1 rounded-md">
-              {(['week', 'month', 'year'] as const).map(z => (
-                <button key={z} onClick={() => setTimelineZoom(z)} className={`px-5 py-2 text-[9px] font-black uppercase rounded transition ${timelineZoom === z ? 'bg-black text-[#FDB913] shadow-lg' : 'text-gray-400 hover:text-black'}`}>{z}</button>
-              ))}
+           <div className="flex space-x-4 items-center">
+               <div className="flex bg-zinc-100 p-1 rounded-md items-center">
+                  <button onClick={() => setWaterfallMode('timeline')} className={`px-3 py-1.5 text-[9px] font-black uppercase rounded flex items-center space-x-1 transition ${waterfallMode === 'timeline' ? 'bg-white shadow text-black' : 'text-gray-400'}`}>
+                      <span>Timeline</span>
+                  </button>
+                  <button onClick={() => setWaterfallMode('hierarchy')} className={`px-3 py-1.5 text-[9px] font-black uppercase rounded flex items-center space-x-1 transition ${waterfallMode === 'hierarchy' ? 'bg-white shadow text-black' : 'text-gray-400'}`}>
+                      <Filter size={10} />
+                      <span>Project Hierarchy</span>
+                  </button>
+               </div>
+               <div className="flex bg-zinc-100 p-1 rounded-md">
+                  {(['week', 'month', 'year'] as const).map(z => (
+                    <button key={z} onClick={() => setTimelineZoom(z)} className={`px-5 py-2 text-[9px] font-black uppercase rounded transition ${timelineZoom === z ? 'bg-black text-[#FDB913] shadow-lg' : 'text-gray-400 hover:text-black'}`}>{z}</button>
+                  ))}
+               </div>
            </div>
         </div>
 
@@ -218,10 +289,18 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
              ) : waterfallItems.map((item) => (
                <div key={item.id} className="relative group">
                  <div className="flex items-center mb-2 ml-4">
+                    {/* Visual Connector for Child Tasks */}
+                    {item.isChild && (
+                        <div className="w-4 h-4 mr-2 text-gray-300 flex items-center justify-center">
+                            <CornerDownRight size={14} />
+                        </div>
+                    )}
                     <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full mr-2 ${item.type === 'Project' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
                       {item.type}
                     </span>
-                    <span className="text-[11px] font-black text-gray-700 tracking-tight transition group-hover:text-black">{item.name}</span>
+                    <span className={`text-[11px] font-black text-gray-700 tracking-tight transition group-hover:text-black`}>
+                        {item.name}
+                    </span>
                  </div>
                  <div className="h-7 w-full bg-zinc-50 rounded-r-full relative overflow-hidden group-hover:bg-zinc-100 transition">
                     {rulerTicks.map((t, i) => <div key={i} className="absolute h-full border-l border-zinc-100 z-0" style={{ left: `${t.pos}%` }}></div>)}

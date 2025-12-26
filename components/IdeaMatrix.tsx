@@ -1,15 +1,17 @@
 
 import React, { useState } from 'react';
-import { Idea } from '../types';
+import { Idea, Task } from '../types';
 import { Lightbulb, Plus, Trash2, TrendingUp, DollarSign } from 'lucide-react';
 
 interface IdeaMatrixProps {
   ideas: Idea[];
+  tasks: Task[];
   users: string[];
   updateIdeas: (ideas: Idea[]) => void;
+  updateTasks: (tasks: Task[]) => void;
 }
 
-const IdeaMatrix: React.FC<IdeaMatrixProps> = ({ ideas, users, updateIdeas }) => {
+const IdeaMatrix: React.FC<IdeaMatrixProps> = ({ ideas, tasks, users, updateIdeas, updateTasks }) => {
   const [showModal, setShowModal] = useState(false);
 
   const quadrants = [
@@ -27,16 +29,40 @@ const IdeaMatrix: React.FC<IdeaMatrixProps> = ({ ideas, users, updateIdeas }) =>
   const handleSaveIdea = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    const ideaText = formData.get('idea') as string;
+    const proposer = formData.get('proposer') as string;
+    
     const newIdea: Idea = {
       id: Math.random().toString(36).substr(2, 9),
-      idea: formData.get('idea') as string,
-      proposer: formData.get('proposer') as string,
+      idea: ideaText,
+      proposer: proposer,
       impact: formData.get('impact') as any,
       cost: formData.get('cost') as any,
       status: 'New',
       date: new Date().toISOString().split('T')[0]
     };
+    
+    // Auto-generate a Task from the Idea
+    const newTask: Task = {
+      id: Math.random().toString(36).substr(2, 9),
+      category: 'Information & Team Suggestions',
+      task: `Improvement: ${ideaText}`,
+      owner: proposer,
+      project: '',
+      status: 'Not Started',
+      priority: 'Medium',
+      progress: 0,
+      hours: 0,
+      startDate: new Date().toISOString().split('T')[0],
+      dueDate: new Date().toISOString().split('T')[0],
+      notes: `Auto-generated from Idea Matrix. Impact: ${newIdea.impact}, Cost: ${newIdea.cost}`,
+      ideaLink: newIdea.id,
+      history: [{ timestamp: new Date().toISOString(), change: 'Operation initialized from Idea Matrix' }],
+      comments: []
+    };
+
     updateIdeas([...ideas, newIdea]);
+    updateTasks([...tasks, newTask]);
     setShowModal(false);
   };
 

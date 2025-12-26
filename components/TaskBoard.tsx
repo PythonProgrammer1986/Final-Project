@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
-import { Task, Status, Priority, OKR, Booking } from '../types';
-import { Plus, Trash2, Search, Target, Clock, AlertTriangle, ListChecks, History } from 'lucide-react';
+import { Task, Status, Priority, OKR, Booking, Idea } from '../types';
+import { Plus, Trash2, Search, Target, Clock, AlertTriangle, ListChecks, History, Link } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface TaskBoardProps {
@@ -10,18 +10,20 @@ interface TaskBoardProps {
   categories: string[];
   projects: any[];
   okrs: OKR[];
+  ideas?: Idea[];
   bookings: Booking[];
   readOnly?: boolean;
   updateTasks: (tasks: Task[]) => void;
 }
 
-const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, projects, okrs, bookings, readOnly, updateTasks }) => {
+const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, projects, okrs, ideas = [], bookings, readOnly, updateTasks }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterOwner, setFilterOwner] = useState('All');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<'details' | 'history'>('details');
   const [tempProgress, setTempProgress] = useState(0);
+  const [selectedOkrId, setSelectedOkrId] = useState<string>('');
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
@@ -48,6 +50,8 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
       startDate: formData.get('startDate') as string,
       dueDate: formData.get('dueDate') as string,
       okrLink: formData.get('okrLink') as string,
+      keyResultLink: formData.get('keyResultLink') as string,
+      ideaLink: formData.get('ideaLink') as string,
       notes: formData.get('notes') as string,
     };
 
@@ -70,6 +74,15 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
     setEditingTask(null);
   };
 
+  const handleDeleteTask = (taskId: string) => {
+    if (readOnly) return;
+    if (confirm('Are you sure you want to permanently delete this operation? This cannot be undone.')) {
+        updateTasks(tasks.filter(t => t.id !== taskId));
+        setShowModal(false);
+        setEditingTask(null);
+    }
+  };
+
   const getActualHours = (taskId: string) => {
     return bookings.filter(b => b.targetId === taskId).reduce((acc, b) => acc + b.hours, 0);
   };
@@ -87,9 +100,12 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
   const openEdit = (task: Task | null) => {
     setEditingTask(task);
     setTempProgress(task ? task.progress : 0);
+    setSelectedOkrId(task ? (task.okrLink || '') : '');
     setActiveSubTab('details');
     setShowModal(true);
   };
+
+  const activeOkr = okrs.find(o => o.id === selectedOkrId);
 
   return (
     <div className="space-y-4">
@@ -188,7 +204,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
 
             <div className="flex-1 overflow-y-auto p-8 bg-white">
               {activeSubTab === 'details' ? (
-                <form id="taskForm" onSubmit={handleSaveTask} className="space-y-6">
+                <form id="taskForm" onSubmit={handleSaveTask} className="space-y-8">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="col-span-2">
                       <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Operational Description *</label>
@@ -232,6 +248,58 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
                       </select>
                     </div>
                   </div>
+
+                  {/* Strategic Alignment Section */}
+                  <div className="pt-6 border-t border-gray-100">
+                    <h3 className="text-xs font-black uppercase tracking-widest text-black mb-4 flex items-center space-x-2">
+                        <Link size={14} />
+                        <span>Strategic Alignment (Optional)</span>
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Link to Project</label>
+                            <select name="project" defaultValue={editingTask?.project || ''} className="w-full border p-3 rounded font-bold outline-none text-xs" disabled={readOnly}>
+                                <option value="">-- No Project Link --</option>
+                                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Link to Improvement</label>
+                            <select name="ideaLink" defaultValue={editingTask?.ideaLink || ''} className="w-full border p-3 rounded font-bold outline-none text-xs" disabled={readOnly}>
+                                <option value="">-- No Improvement Link --</option>
+                                {ideas.map(i => <option key={i.id} value={i.id}>{i.idea.substring(0, 30)}...</option>)}
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+                         <div>
+                            <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Link to OKR</label>
+                            <select 
+                                name="okrLink" 
+                                value={selectedOkrId} 
+                                onChange={(e) => setSelectedOkrId(e.target.value)} 
+                                className="w-full border p-3 rounded font-bold outline-none text-xs" 
+                                disabled={readOnly}
+                            >
+                                <option value="">-- No OKR Link --</option>
+                                {okrs.map(o => <option key={o.id} value={o.id}>{o.objective}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                             <label className="block text-[10px] font-black uppercase text-gray-400 mb-2 tracking-widest">Target Key Result</label>
+                             <select 
+                                name="keyResultLink" 
+                                defaultValue={editingTask?.keyResultLink || ''} 
+                                className="w-full border p-3 rounded font-bold outline-none text-xs disabled:bg-gray-100" 
+                                disabled={readOnly || !selectedOkrId}
+                             >
+                                <option value="">-- Select Specific Key Result --</option>
+                                {activeOkr?.keyResults.map(kr => <option key={kr.id} value={kr.id}>{kr.kr}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                  </div>
                 </form>
               ) : (
                 <div className="space-y-6">
@@ -252,9 +320,18 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
             </div>
 
             {!readOnly && (
-              <div className="p-8 border-t bg-zinc-50 flex justify-end items-center shrink-0 space-x-4">
-                  <button type="button" onClick={() => setShowModal(false)} className="px-8 py-3 text-[11px] font-black uppercase tracking-widest text-zinc-400 hover:text-black transition">Cancel</button>
-                  <button type="submit" form="taskForm" className="px-12 py-4 bg-black text-[#FDB913] rounded-full font-black uppercase text-xs tracking-widest shadow-2xl transition hover:brightness-110">Commit Operation</button>
+              <div className="p-8 border-t bg-zinc-50 flex justify-between items-center shrink-0">
+                  {editingTask && (
+                      <button type="button" onClick={() => handleDeleteTask(editingTask.id)} className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-red-500 hover:bg-red-50 rounded transition flex items-center space-x-2">
+                          <Trash2 size={14} />
+                          <span>Delete Operation</span>
+                      </button>
+                  )}
+                  {!editingTask && <div></div>} {/* Spacer */}
+                  <div className="flex items-center space-x-4">
+                    <button type="button" onClick={() => setShowModal(false)} className="px-8 py-3 text-[11px] font-black uppercase tracking-widest text-zinc-400 hover:text-black transition">Cancel</button>
+                    <button type="submit" form="taskForm" className="px-12 py-4 bg-black text-[#FDB913] rounded-full font-black uppercase text-xs tracking-widest shadow-2xl transition hover:brightness-110">Commit Operation</button>
+                  </div>
               </div>
             )}
           </div>

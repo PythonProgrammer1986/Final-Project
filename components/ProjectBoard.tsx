@@ -12,6 +12,7 @@ interface ProjectBoardProps {
 const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, users, updateProjects }) => {
   const [showModal, setShowModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [tempProgress, setTempProgress] = useState(0);
 
   const handleSaveProject = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -24,6 +25,7 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, users, updateProj
       endDate: formData.get('endDate') as string,
       hours: parseFloat(formData.get('hours') as string),
       description: formData.get('description') as string,
+      progress: tempProgress
     };
 
     if (editingProject) {
@@ -31,6 +33,7 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, users, updateProj
     } else {
       const newProj: Project = {
         id: Math.random().toString(36).substr(2, 9),
+        progress: 0,
         ...projData as any
       };
       updateProjects([...projects, newProj]);
@@ -38,6 +41,12 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, users, updateProj
     setShowModal(false);
     setEditingProject(null);
   };
+
+  const openEdit = (p: Project | null) => {
+      setEditingProject(p);
+      setTempProgress(p ? (p.progress || 0) : 0);
+      setShowModal(true);
+  }
 
   const handleDelete = (id: string) => {
     if (confirm('Delete this project?')) {
@@ -50,7 +59,7 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, users, updateProj
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800">Projects Management</h2>
         <button
-          onClick={() => { setEditingProject(null); setShowModal(true); }}
+          onClick={() => openEdit(null)}
           className="bg-black text-[#FDB913] px-6 py-2 rounded-md font-bold flex items-center space-x-2 hover:bg-[#222] transition shadow-md"
         >
           <Plus size={20} />
@@ -67,7 +76,7 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, users, updateProj
                 <p className="text-xs font-bold text-gray-400 uppercase">Manager: {project.manager}</p>
               </div>
               <div className="flex space-x-2">
-                <button onClick={() => { setEditingProject(project); setShowModal(true); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded"><Edit2 size={16} /></button>
+                <button onClick={() => openEdit(project)} className="p-2 text-blue-600 hover:bg-blue-50 rounded"><Edit2 size={16} /></button>
                 <button onClick={() => handleDelete(project.id)} className="p-2 text-red-600 hover:bg-red-50 rounded"><Trash2 size={16} /></button>
               </div>
             </div>
@@ -84,6 +93,15 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, users, updateProj
               <div className="p-3 bg-gray-50 rounded">
                 <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Timeline</p>
                 <span className="text-xs font-bold text-gray-700">{project.startDate} to {project.endDate}</span>
+              </div>
+              <div className="p-3 bg-gray-50 rounded">
+                <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Completion</p>
+                <div className="flex items-center space-x-2">
+                    <div className="flex-1 h-1.5 bg-gray-200 rounded-full">
+                        <div className="h-full bg-[#FDB913] rounded-full" style={{ width: `${project.progress || 0}%` }}></div>
+                    </div>
+                    <span className="text-xs font-bold text-gray-700">{project.progress || 0}%</span>
+                </div>
               </div>
             </div>
 
@@ -129,9 +147,18 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, users, updateProj
                   <input type="date" name="endDate" defaultValue={editingProject?.endDate} className="w-full border border-gray-200 rounded px-3 py-2" />
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Estimated Hours</label>
-                <input type="number" step="0.5" name="hours" defaultValue={editingProject?.hours || 0} className="w-full border border-gray-200 rounded px-3 py-2" />
+              <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Estimated Hours</label>
+                    <input type="number" step="0.5" name="hours" defaultValue={editingProject?.hours || 0} className="w-full border border-gray-200 rounded px-3 py-2" />
+                  </div>
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-bold text-gray-500 uppercase">Completion (%)</label>
+                        <span className="text-xs font-black">{tempProgress}%</span>
+                    </div>
+                    <input type="range" name="progress" min="0" max="100" value={tempProgress} onChange={(e) => setTempProgress(parseInt(e.target.value))} className="w-full h-2 bg-zinc-100 rounded-lg appearance-none cursor-pointer accent-[#FDB913]" />
+                  </div>
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Description</label>
