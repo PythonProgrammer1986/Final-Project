@@ -1,8 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Task, Status, Priority, OKR, Booking } from '../types';
-import { BRAND } from '../constants';
-import { Plus, Edit2, Trash2, Search, Filter, History, MessageSquare, Target, Clock } from 'lucide-react';
+import { Plus, Trash2, Search, Target, Clock, AlertTriangle } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 interface TaskBoardProps {
@@ -22,6 +21,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<'details' | 'history'>('details');
+  const [tempProgress, setTempProgress] = useState(0);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
@@ -60,7 +60,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
     } else {
       const newTask: Task = {
         id: Math.random().toString(36).substr(2, 9),
-        history: [{ timestamp: new Date().toISOString(), change: 'Task created' }],
+        history: [{ timestamp: new Date().toISOString(), change: 'Task initiated' }],
         comments: [],
         ...taskData as any
       };
@@ -84,36 +84,28 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
     }
   };
 
+  const openInit = (task: Task | null) => {
+    setEditingTask(task);
+    setTempProgress(task ? task.progress : 0);
+    setActiveSubTab('details');
+    setShowModal(true);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap justify-between items-center gap-4 bg-white p-4 rounded shadow-sm border border-gray-100">
         <div className="flex items-center space-x-4 flex-1 max-w-2xl">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input
-              type="text"
-              placeholder="Filter tasks..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded text-sm outline-none"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+            <input type="text" placeholder="Filter tasks..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded text-sm outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
           </div>
-          <select
-            className="border border-gray-200 rounded px-3 py-2 text-xs font-black uppercase"
-            value={filterOwner}
-            onChange={(e) => setFilterOwner(e.target.value)}
-          >
+          <select className="border border-gray-200 rounded px-3 py-2 text-xs font-black uppercase" value={filterOwner} onChange={(e) => setFilterOwner(e.target.value)}>
             <option value="All">All People</option>
             {users.map(u => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
         {!readOnly && (
-          <button
-            onClick={() => { setEditingTask(null); setShowModal(true); setActiveSubTab('details'); }}
-            className="bg-black text-[#FDB913] px-6 py-2 rounded font-black text-xs uppercase tracking-widest shadow-lg"
-          >
-            Add Operation
-          </button>
+          <button onClick={() => openInit(null)} className="bg-black text-[#FDB913] px-6 py-2 rounded font-black text-xs uppercase tracking-widest shadow-lg">Initiate Operation</button>
         )}
       </div>
 
@@ -123,18 +115,19 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
             <tr>
               <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Operation Detail</th>
               <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Stakeholder</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Burn Rate (Act/Est)</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest text-right">Target Progress</th>
+              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Duration (Est)</th>
+              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Efficiency</th>
+              <th className="px-6 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest text-right">Progress</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {filteredTasks.map(t => {
               const actual = getActualHours(t.id);
-              const est = t.hours || 1;
-              const burnPct = Math.min(100, (actual / est) * 100);
+              const est = t.hours || 0;
+              const burnPct = est > 0 ? Math.min(100, (actual / est) * 100) : 0;
               
               return (
-                <tr key={t.id} className="hover:bg-gray-50/50 transition group cursor-pointer" onClick={() => { setEditingTask(t); setShowModal(true); }}>
+                <tr key={t.id} className="hover:bg-gray-50/50 transition group cursor-pointer" onClick={() => openInit(t)}>
                   <td className="px-6 py-4">
                     <p className="font-bold text-gray-800 text-sm">{t.task}</p>
                     <div className="flex items-center space-x-2 mt-1">
@@ -143,20 +136,19 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
                     </div>
                   </td>
                   <td className="px-6 py-4 text-xs font-bold text-gray-700">{t.owner}</td>
+                  <td className="px-6 py-4 text-xs font-black text-gray-500">{est} Hrs</td>
                   <td className="px-6 py-4">
                     <div className="flex items-center space-x-3">
                        <div className="w-20 bg-gray-100 h-1 rounded-full overflow-hidden">
-                          <div className={`h-full ${actual > est ? 'bg-red-500' : 'bg-[#FDB913]'}`} style={{ width: `${burnPct}%` }}></div>
+                          <div className={`h-full ${actual > est && est > 0 ? 'bg-red-500' : 'bg-[#FDB913]'}`} style={{ width: `${burnPct}%` }}></div>
                        </div>
-                       <span className="text-[10px] font-black uppercase">{actual}h / {est}h</span>
+                       <span className="text-[10px] font-black uppercase text-gray-400">{actual}h Logged</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex flex-col items-end">
                       <span className="text-xs font-black text-gray-900">{t.progress}%</span>
-                      <div className="w-24 bg-gray-100 h-1 rounded-full mt-1">
-                        <div className="bg-black h-1 rounded-full" style={{ width: `${t.progress}%` }}></div>
-                      </div>
+                      <div className="w-24 bg-gray-100 h-1 rounded-full mt-1"><div className="bg-black h-1 rounded-full" style={{ width: `${t.progress}%` }}></div></div>
                     </div>
                   </td>
                 </tr>
@@ -170,14 +162,14 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="p-6 bg-[#FDB913] text-black flex justify-between items-center shrink-0">
-              <h2 className="text-xl font-black uppercase tracking-tight">{editingTask ? 'Manage Operation' : 'Initiate Operation'}</h2>
+              <h2 className="text-xl font-black uppercase tracking-tight">{editingTask ? 'Edit Operation' : 'Initiate New Operation'}</h2>
               <button onClick={() => setShowModal(false)} className="font-black text-2xl">×</button>
             </div>
             
             <div className="flex bg-gray-50 border-b shrink-0">
-              <button onClick={() => setActiveSubTab('details')} className={`px-8 py-3 text-[10px] font-black uppercase tracking-widest ${activeSubTab === 'details' ? 'border-b-2 border-black bg-white' : 'text-gray-400'}`}>Details</button>
+              <button onClick={() => setActiveSubTab('details')} className={`px-8 py-3 text-[10px] font-black uppercase tracking-widest ${activeSubTab === 'details' ? 'border-b-2 border-black bg-white' : 'text-gray-400'}`}>Operational Parameters</button>
               {editingTask && (
-                <button onClick={() => setActiveSubTab('history')} className={`px-8 py-3 text-[10px] font-black uppercase tracking-widest ${activeSubTab === 'history' ? 'border-b-2 border-black bg-white' : 'text-gray-400'}`}>History Log</button>
+                <button onClick={() => setActiveSubTab('history')} className={`px-8 py-3 text-[10px] font-black uppercase tracking-widest ${activeSubTab === 'history' ? 'border-b-2 border-black bg-white' : 'text-gray-400'}`}>System Audit Log</button>
               )}
             </div>
 
@@ -197,7 +189,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
                     </div>
                     <div>
                       <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Estimated Duration (Hrs)</label>
-                      <input type="number" step="0.5" name="hours" defaultValue={editingTask?.hours || 0} className="w-full border p-2 rounded" readOnly={readOnly} />
+                      <input type="number" step="0.5" name="hours" defaultValue={editingTask?.hours || 0} className="w-full border p-2 rounded font-black text-zinc-900" readOnly={readOnly} placeholder="e.g. 12.5" />
                     </div>
                     <div>
                        <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Operation Status</label>
@@ -206,8 +198,11 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
                        </select>
                     </div>
                     <div>
-                       <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Target Progress (%)</label>
-                       <input type="range" name="progress" min="0" max="100" defaultValue={editingTask?.progress || 0} className="w-full mt-2" disabled={readOnly} />
+                       <div className="flex justify-between items-center mb-1">
+                          <label className="block text-[10px] font-black uppercase text-gray-500 tracking-widest">Target Progress</label>
+                          <span className="text-xs font-black text-[#FDB913] bg-black px-2 py-0.5 rounded">{tempProgress}%</span>
+                       </div>
+                       <input type="range" name="progress" min="0" max="100" value={tempProgress} onChange={(e) => setTempProgress(parseInt(e.target.value))} className="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black mt-2" disabled={readOnly} />
                     </div>
                     <div>
                       <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Deployment Date</label>
@@ -220,7 +215,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
                     <div>
                       <label className="block text-[10px] font-black uppercase text-gray-500 mb-1 tracking-widest">Strategic OKR Link</label>
                       <select name="okrLink" defaultValue={editingTask?.okrLink} className="w-full border p-2 rounded" disabled={readOnly}>
-                        <option value="">No Link</option>
+                        <option value="">No Strategic Connection</option>
                         {okrs.map(o => <option key={o.id} value={o.id}>{o.objective}</option>)}
                       </select>
                     </div>
@@ -230,13 +225,8 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
                 <div className="space-y-4">
                   {editingTask?.history?.map((entry, idx) => (
                     <div key={idx} className="flex space-x-4">
-                      <div className="w-24 shrink-0 text-[9px] font-black text-gray-400 mt-1 uppercase leading-none">
-                        {format(parseISO(entry.timestamp), 'MMM d, HH:mm')}
-                      </div>
-                      <div className="flex-1 pb-4 border-l-2 border-gray-100 pl-6 relative">
-                         <div className="absolute w-2 h-2 rounded-full bg-black -left-1.5 top-0.5"></div>
-                         <p className="text-xs font-black text-gray-800 uppercase tracking-tight">{entry.change}</p>
-                      </div>
+                      <div className="w-24 shrink-0 text-[9px] font-black text-gray-400 mt-1 uppercase leading-none">{format(parseISO(entry.timestamp), 'MMM d, HH:mm')}</div>
+                      <div className="flex-1 pb-4 border-l-2 border-gray-100 pl-6 relative"><div className="absolute w-2 h-2 rounded-full bg-black -left-1.5 top-0.5"></div><p className="text-xs font-black text-gray-800 uppercase tracking-tight">{entry.change}</p></div>
                     </div>
                   ))}
                 </div>
@@ -245,8 +235,8 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
 
             {!readOnly && (
               <div className="p-6 border-t bg-gray-50 flex justify-end items-center shrink-0 space-x-3">
-                  <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2 text-[10px] font-black uppercase">Cancel</button>
-                  <button type="submit" form="taskForm" className="px-8 py-3 bg-black text-[#FDB913] rounded font-black uppercase tracking-widest shadow-xl">Update Operation</button>
+                  <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2 text-[10px] font-black uppercase">Close</button>
+                  <button type="submit" form="taskForm" className="px-8 py-3 bg-black text-[#FDB913] rounded font-black uppercase tracking-widest shadow-xl">Commit Operation</button>
               </div>
             )}
           </div>

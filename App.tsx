@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Calendar, CheckSquare, LayoutDashboard, Target, Clock, 
   Settings, Save, HardDrive, FileCode, Wifi, WifiOff,
@@ -32,7 +32,7 @@ const App: React.FC = () => {
       ideas: [],
       kudos: [],
       okrs: [],
-      users: DEFAULT_USERS.map(name => ({ name, capacity: 160 })), // Monthly capacity default
+      users: DEFAULT_USERS.map(name => ({ name, capacity: 160 })),
       bookings: [],
       categories: DEFAULT_CATEGORIES,
       safetyStatus: {},
@@ -46,60 +46,66 @@ const App: React.FC = () => {
   const [lastFileHash, setLastFileHash] = useState<string>('');
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
-  const isUpdatingRef = useRef(false);
   const dataRef = useRef(data);
+  useEffect(() => { dataRef.current = data; }, [data]);
 
+  // Persistent Local Storage for UI and Local DB
   useEffect(() => {
-    dataRef.current = data;
     if (!isReadOnly) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     }
   }, [data, isReadOnly]);
 
-  // Auto Backup Logic
+  // Daily Auto Backup Logic
   useEffect(() => {
-    const runBackup = async () => {
+    const performAutoBackup = async () => {
       if (!backupDirHandle || isReadOnly) return;
+      
       const today = new Date().toISOString().split('T')[0];
       if (data.lastBackupDate === today) return;
 
       try {
-        const fileName = `epiroc_backup_${today}.json`;
-        const fileHandle = await backupDirHandle.getFileHandle(fileName, { create: true });
+        // We need to ensure we have permission (Chrome/Edge security might reset handle on refresh)
         // @ts-ignore
-        const writable = await fileHandle.createWritable();
+        const permission = await backupDirHandle.queryPermission({ mode: 'readwrite' });
+        if (permission !== 'granted') return;
+
+        const fileName = `epiroc_autobackup_${today}.json`;
+        const newFileHandle = await backupDirHandle.getFileHandle(fileName, { create: true });
+        // @ts-ignore
+        const writable = await newFileHandle.createWritable();
         await writable.write(JSON.stringify(data, null, 2));
         await writable.close();
+        
         setData(prev => ({ ...prev, lastBackupDate: today }));
-        console.log("Daily backup completed:", fileName);
-      } catch (e) {
-        console.error("Backup failed", e);
+        console.log(`✓ Daily backup performed: ${fileName}`);
+      } catch (err) {
+        console.error("Auto backup failed:", err);
       }
     };
-    runBackup();
+
+    // Delay slightly to ensure handle is ready
+    const timer = setTimeout(performAutoBackup, 3000);
+    return () => clearTimeout(timer);
   }, [backupDirHandle, data.lastBackupDate, isReadOnly]);
 
   const mergeData = (local: AppState, remote: AppState): AppState => {
-    // Smart merge: unique IDs preserved, latest versions taken
     const mergeById = (a: any[], b: any[]) => {
       const map = new Map();
-      [...a, ...b].forEach(item => {
-        const existing = map.get(item.id);
-        if (!existing) {
-          map.set(item.id, item);
-        }
+      [...(a || []), ...(b || [])].forEach(item => {
+        if (item && item.id) map.set(item.id, item);
       });
       return Array.from(map.values());
     };
 
     return {
       ...remote,
-      tasks: mergeById(local.tasks || [], remote.tasks || []),
-      projects: mergeById(local.projects || [], remote.projects || []),
-      ideas: mergeById(local.ideas || [], remote.ideas || []),
-      kudos: mergeById(local.kudos || [], remote.kudos || []),
-      okrs: mergeById(local.okrs || [], remote.okrs || []),
-      bookings: mergeById(local.bookings || [], remote.bookings || []),
+      tasks: mergeById(local.tasks, remote.tasks),
+      projects: mergeById(local.projects, remote.projects),
+      ideas: mergeById(local.ideas, remote.ideas),
+      kudos: mergeById(local.kudos, remote.kudos),
+      okrs: mergeById(local.okrs, remote.okrs),
+      bookings: mergeById(local.bookings, remote.bookings),
       safetyStatus: { ...(local.safetyStatus || {}), ...(remote.safetyStatus || {}) }
     };
   };
@@ -109,7 +115,6 @@ const App: React.FC = () => {
       // @ts-ignore
       const [handle] = await window.showOpenFilePicker({
         types: [{ description: 'Epiroc Database', accept: { 'application/json': ['.json'] } }],
-        excludeAcceptAllOption: true,
         multiple: false
       });
       setFileHandle(handle);
@@ -130,23 +135,7 @@ const App: React.FC = () => {
       // @ts-ignore
       const handle = await window.showDirectoryPicker();
       setBackupDirHandle(handle);
-    } catch (e) { console.error(e); }
-  };
-
-  const importBackupFile = async () => {
-    try {
-      // @ts-ignore
-      const [handle] = await window.showOpenFilePicker({
-        types: [{ description: 'Epiroc Backup', accept: { 'application/json': ['.json'] } }],
-        multiple: false
-      });
-      const file = await handle.getFile();
-      const content = await file.text();
-      const backupData = JSON.parse(content);
-      setData(backupData);
-      setIsReadOnly(true); // Enter Read-Only View
-      setActiveTab('dashboard');
-      alert("VIEW-ONLY MODE: You are viewing a backup. Edits are disabled.");
+      alert("Auto-backup folder linked successfully. Backups will occur daily.");
     } catch (e) { console.error(e); }
   };
 
@@ -155,24 +144,8 @@ const App: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `epiroc_full_export_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `epiroc_export_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
-  };
-
-  const importData = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const newData = JSON.parse(evt.target?.result as string);
-        if (confirm("Restore this data? Current local data will be replaced.")) {
-          setData(newData);
-          setIsReadOnly(false);
-        }
-      } catch (err) { alert("Invalid JSON file"); }
-    };
-    reader.readAsText(file);
   };
 
   useEffect(() => {
@@ -184,12 +157,10 @@ const App: React.FC = () => {
         const content = await file.text();
         if (content !== lastFileHash) {
           const remoteData = JSON.parse(content);
-          isUpdatingRef.current = true;
           const merged = mergeData(dataRef.current, remoteData);
           setData(merged);
           setLastFileHash(JSON.stringify(merged));
           setLastSyncTime(new Date());
-          setTimeout(() => { isUpdatingRef.current = false; }, 500);
         } else {
           const localContent = JSON.stringify(dataRef.current, null, 2);
           if (localContent !== lastFileHash) {
@@ -201,7 +172,7 @@ const App: React.FC = () => {
             setLastSyncTime(new Date());
           }
         }
-      } catch (err) { console.error(err); } finally { setTimeout(() => setIsAutoSaving(false), 500); }
+      } catch (err) { console.error(err); } finally { setIsAutoSaving(false); }
     }, 5000);
     return () => clearInterval(interval);
   }, [fileHandle, lastFileHash, isReadOnly]);
@@ -225,20 +196,12 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8F9FA]">
-      {isReadOnly && (
-        <div className="bg-red-600 text-white text-[10px] font-black uppercase tracking-[0.2em] py-1 px-8 text-center flex items-center justify-center space-x-4">
-          <Eye size={12} />
-          <span>VIEWING HISTORICAL BACKUP - READ ONLY MODE</span>
-          <button onClick={() => { setIsReadOnly(false); window.location.reload(); }} className="underline ml-4">Exit & Refresh</button>
-        </div>
-      )}
-      
       <header className={`transition-all duration-500 h-24 flex items-center px-8 relative overflow-hidden ${isReadOnly ? 'bg-zinc-800 text-white' : fileHandle ? 'bg-black text-white' : 'bg-[#FDB913] text-black'}`}>
         <div className="absolute top-0 right-0 w-1/3 h-full bg-white/5 skew-x-[-20deg] translate-x-20 z-0"></div>
         <div className="flex items-center z-10 space-x-6">
           <div className={`w-14 h-14 flex items-center justify-center font-black text-3xl rounded-sm border-2 ${fileHandle ? 'bg-[#FDB913] text-black border-black/10' : 'bg-black text-[#FDB913] border-white/10'}`}>E</div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight uppercase">Epiroc Pulse</h1>
+            <h1 className="text-2xl font-black tracking-tight uppercase">Operations Development Pulse</h1>
             <div className="flex items-center space-x-3 text-[10px] uppercase tracking-widest font-black opacity-80">
               <span className="flex items-center">
                 {fileHandle ? <Wifi size={10} className="text-green-400 mr-1" /> : <WifiOff size={10} className="mr-1" />}
@@ -247,7 +210,7 @@ const App: React.FC = () => {
               <span>•</span>
               <span className="flex items-center">
                 <ShieldCheck size={10} className={`mr-1 ${backupDirHandle ? 'text-green-400' : 'text-gray-400'}`} />
-                BACKUP: {backupDirHandle ? 'ENABLED' : 'OFF'}
+                BACKUP: {backupDirHandle ? 'ACTIVE' : 'OFF'}
               </span>
             </div>
           </div>
@@ -257,27 +220,19 @@ const App: React.FC = () => {
 
         <div className="flex items-center space-x-4 z-10">
            {!isReadOnly && (
-             <div className="flex space-x-2">
-                <button onClick={exportData} title="Export Data" className="p-2 bg-white/10 rounded hover:bg-white/20 transition"><Download size={18} /></button>
-                <label className="p-2 bg-white/10 rounded hover:bg-white/20 transition cursor-pointer" title="Import Data">
-                  <Upload size={18} />
-                  <input type="file" className="hidden" accept=".json" onChange={importData} />
-                </label>
-             </div>
+             <button onClick={exportData} title="Export JSON" className="p-2 bg-white/10 rounded hover:bg-white/20 transition flex items-center space-x-2">
+               <Download size={18} />
+               <span className="text-[10px] font-black uppercase">Export</span>
+             </button>
            )}
            
-           <button onClick={importBackupFile} className="bg-white/10 text-white px-4 py-3 rounded font-black text-[10px] uppercase tracking-widest flex items-center space-x-2 border border-white/10 hover:bg-white/20 transition">
-             <History size={14} />
-             <span>Restore Backup</span>
-           </button>
-
            {fileHandle ? (
              <div className="flex items-center bg-white/10 px-6 py-3 rounded border border-white/5 space-x-6">
                 <div className="flex flex-col items-end border-r border-white/10 pr-6">
-                  <span className="text-[8px] opacity-50 font-black tracking-widest uppercase">Auto-Save</span>
+                  <span className="text-[8px] opacity-50 font-black tracking-widest uppercase">Cloud State</span>
                   <div className="flex items-center space-x-2">
                     {isAutoSaving ? <RefreshCw size={12} className="text-[#FDB913] animate-spin" /> : <Save size={12} className="text-green-400" />}
-                    <span className="text-[10px] font-black">{isAutoSaving ? 'WRITING...' : 'IDLE'}</span>
+                    <span className="text-[10px] font-black">{isAutoSaving ? 'SYNCING...' : 'SAVED'}</span>
                   </div>
                 </div>
                 <div className="flex flex-col items-end">
@@ -288,7 +243,7 @@ const App: React.FC = () => {
            ) : !isReadOnly && (
              <button onClick={linkSharedFile} className="bg-black text-[#FDB913] hover:brightness-110 px-6 py-3 rounded font-black text-xs uppercase tracking-widest shadow-2xl flex items-center space-x-2 border-2 border-[#FDB913]/20 transition-all">
                <FileCode size={18} />
-               <span>Connect Shared Drive (Z:\)</span>
+               <span>Connect DB (Z:\Drive)</span>
              </button>
            )}
         </div>
@@ -326,13 +281,13 @@ const App: React.FC = () => {
                <div className="flex items-center space-x-4">
                   <Database className="text-[#FDB913]" size={24} />
                   <div>
-                    <h3 className="font-black uppercase tracking-tight">Auto Backup Directory</h3>
-                    <p className="text-xs text-gray-500 uppercase">{backupDirHandle ? `Syncing to: ${backupDirHandle.name}` : 'Link a folder for daily snapshots'}</p>
+                    <h3 className="font-black uppercase tracking-tight">Auto Backup System</h3>
+                    <p className="text-xs text-gray-500 uppercase">{backupDirHandle ? `Daily Snapshot: ${backupDirHandle.name}` : 'Setup a daily auto-backup directory'}</p>
                   </div>
                </div>
                {!isReadOnly && (
-                 <button onClick={linkBackupDir} className="bg-black text-[#FDB913] px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest">
-                   {backupDirHandle ? 'Change Folder' : 'Link Folder'}
+                 <button onClick={linkBackupDir} className="bg-black text-[#FDB913] px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest shadow-lg">
+                   {backupDirHandle ? 'Change Target Folder' : 'Enable Auto-Backup'}
                  </button>
                )}
             </div>
@@ -340,16 +295,6 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
-
-      <footer className="bg-white border-t border-gray-200 py-3 px-8 flex justify-between items-center text-[9px] text-gray-400 font-bold uppercase tracking-widest">
-        <div className="flex items-center space-x-6">
-          <span>© {new Date().getFullYear()} EPIROC ROCKDRILL AB</span>
-          <span className={fileHandle ? "text-green-500" : "text-gray-300"}>● SYNC: {fileHandle ? 'SHARED DRIVE' : 'LOCAL CACHE'}</span>
-        </div>
-        <div className="flex items-center space-x-4">
-           <span>ENTERPRISE v5.0.0 (GANTT ZOOM & WATERFALL)</span>
-        </div>
-      </footer>
     </div>
   );
 };

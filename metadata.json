@@ -1,5 +1,5 @@
 {
-  "name": "Epiroc Rockdrill Management System",
-  "description": "A comprehensive project and task management application for Epiroc Rockdrill AB, featuring dynamic dashboards, Gantt charts, KPI tracking, and interactive calendars.",
+  "name": "Operations Development Pulse",
+  "description": "A comprehensive project and task management application for Epiroc, featuring dynamic dashboards, Gantt charts, KPI tracking, and interactive calendars.",
   "requestFramePermissions": []
 }
