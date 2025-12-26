@@ -1,9 +1,9 @@
 
 import React, { useState } from 'react';
 import { 
-  format, addMonths, subMonths, startOfMonth, endOfMonth, 
-  startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, 
-  isSameDay, addDays, parseISO 
+  format, addMonths, endOfMonth, 
+  endOfWeek, eachDayOfInterval, isSameMonth, 
+  isSameDay, addDays 
 } from 'date-fns';
 import { Task, SafetyStatus } from '../types';
 import { ChevronLeft, ChevronRight, AlertCircle, CheckCircle2, Info } from 'lucide-react';
@@ -24,7 +24,8 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
   };
 
   const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
-  const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
+  // Fix: Replaced subMonths with addMonths negative value
+  const prevMonth = () => setCurrentMonth(addMonths(currentMonth, -1));
 
   const renderHeader = () => (
     <div className="flex justify-between items-center bg-white p-4 rounded-t-lg border-b border-gray-100">
@@ -51,9 +52,12 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
   };
 
   const renderCells = () => {
-    const monthStart = startOfMonth(currentMonth);
+    // Fix: Replaced startOfMonth with native Date logic
+    const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
     const monthEnd = endOfMonth(monthStart);
-    const startDate = startOfWeek(monthStart);
+    // Fix: Replaced startOfWeek with native Date logic
+    const startDate = new Date(monthStart);
+    startDate.setDate(startDate.getDate() - startDate.getDay());
     const endDate = endOfWeek(monthEnd);
     const calendarDays = eachDayOfInterval({ start: startDate, end: endDate });
 

@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Booking, Task, Project } from '../types';
 import { Clock, Plus, Trash2, Calendar, User, Search } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 
 interface HoursBookingProps {
   bookings: Booking[];

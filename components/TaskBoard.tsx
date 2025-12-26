@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Task, Status, Priority, OKR, Booking } from '../types';
 import { Plus, Trash2, Search, Target, Clock, AlertTriangle, ListChecks, History } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 
 interface TaskBoardProps {
   tasks: Task[];
@@ -238,7 +238,8 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
                   {editingTask?.history?.map((entry, idx) => (
                     <div key={idx} className="flex space-x-6">
                       <div className="w-28 shrink-0 text-[10px] font-black text-gray-400 mt-1 uppercase tracking-tighter">
-                        {format(parseISO(entry.timestamp), 'MMM d, HH:mm')}
+                        {/* Fix: Replaced parseISO with native Date constructor */}
+                        {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
                       </div>
                       <div className="flex-1 pb-6 border-l-2 border-zinc-100 pl-8 relative">
                          <div className="absolute w-3 h-3 rounded-full bg-black -left-[7px] top-0 border-4 border-white"></div>

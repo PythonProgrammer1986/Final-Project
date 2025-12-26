@@ -20,7 +20,7 @@ import Masters from './components/Masters';
 import HoursBooking from './components/HoursBooking';
 
 const STORAGE_KEY = 'epiroc_pulse_v5_final';
-const APP_VERSION = '5.2.0';
+const APP_VERSION = '5.4.0';
 
 const tabs = [
   { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
@@ -85,7 +85,7 @@ const App: React.FC = () => {
         return;
       }
 
-      const fileName = `epiroc_pulse_backup_${today}.json`;
+      const fileName = `epiroc_daily_snapshot_${today}.json`;
       const newFileHandle = await backupDirHandle.getFileHandle(fileName, { create: true });
       // @ts-ignore
       const writable = await newFileHandle.createWritable();
@@ -94,9 +94,9 @@ const App: React.FC = () => {
       
       setData(prev => ({ ...prev, lastBackupDate: today }));
       setNeedsBackupAuth(false);
-      console.log(`✓ Auto-backup success: ${fileName}`);
+      console.log(`✓ Auto-backup snapshot created: ${fileName}`);
     } catch (err) {
-      console.error("Backup failed", err);
+      console.error("Auto-backup failed", err);
       setNeedsBackupAuth(true);
     }
   };
@@ -104,7 +104,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (backupDirHandle) performAutoBackup();
-    }, 2000);
+    }, 3000);
     return () => clearTimeout(timer);
   }, [backupDirHandle, data.lastBackupDate]);
 
@@ -156,8 +156,8 @@ const App: React.FC = () => {
       const handle = await window.showDirectoryPicker();
       setBackupDirHandle(handle);
       setNeedsBackupAuth(false);
-      alert("Auto-backup location confirmed. Daily snapshots enabled.");
-    } catch (e) { console.error(e); }
+      performAutoBackup();
+    } catch (e) { console.error("Folder selection cancelled"); }
   };
 
   const reAuthBackup = async () => {
@@ -177,7 +177,7 @@ const App: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `epiroc_pulse_export_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `epiroc_manual_export_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
   };
 
@@ -221,36 +221,41 @@ const App: React.FC = () => {
         <div className="bg-[#E74C3C] text-white py-2 px-8 flex items-center justify-between text-[11px] font-black uppercase tracking-widest z-[100] shadow-lg">
           <div className="flex items-center space-x-3">
              <AlertTriangle size={14} />
-             <span>Daily Backup requires manual re-authorization to access folder</span>
+             <span>Security Alert: Daily Backup Engine requires authorization</span>
           </div>
-          <button onClick={reAuthBackup} className="bg-white text-[#E74C3C] px-4 py-1 rounded-full flex items-center space-x-2 hover:bg-zinc-100 transition shadow-sm">
+          <button onClick={reAuthBackup} className="bg-white text-[#E74C3C] px-4 py-1 rounded-full flex items-center space-x-2 hover:bg-zinc-100 transition shadow-sm font-black">
             <Play size={10} fill="currentColor" />
-            <span>Authorize Now</span>
+            <span>AUTHORIZE SNAPSHOTS</span>
           </button>
         </div>
       )}
 
-      <header className={`h-24 flex items-center px-8 relative overflow-hidden transition-colors duration-500 ${isReadOnly ? 'bg-zinc-800 text-white' : fileHandle ? 'bg-black text-white' : 'bg-[#FDB913] text-black'}`}>
-        <div className="flex items-center z-10 space-x-6">
-          <div className="bg-white p-2 rounded shadow-sm flex items-center justify-center w-14 h-14 border border-zinc-100">
-            <svg viewBox="0 0 100 100" className="w-10 h-10">
-              <rect width="100" height="100" fill="#FDB913" rx="8" />
-              <path d="M25 25 H75 V35 H25 V45 H65 V55 H25 V65 H75 V75 H25 Z" fill="black" />
+      {/* Brand Header - epiroc yellow background as requested */}
+      <header className={`h-28 flex items-center px-8 relative overflow-hidden transition-colors duration-500 bg-[#FDB913] text-[#3d4d5b]`}>
+        <div className="flex flex-col z-10 space-y-2">
+          {/* Epiroc Precise Brand Logo Reconstruction */}
+          <div className="flex items-center space-x-4">
+            <svg viewBox="0 0 350 100" className="h-16 w-auto" fill="currentColor">
+              {/* Hexagon Shape */}
+              <path d="M78 25L52.5 10.5L27 25v29L52.5 68.5L78 54V25z" />
+              {/* Inner stylized 'e' mark (matching brand geometry) */}
+              <path fill="#FDB913" d="M52.5 16.5L34 27.2v21l18.5 10.7l18.5-10.7v-21L52.5 16.5zm8.7 28.2l-8.7 5l-8.7-5V30.6l8.7 5v8.6l8.7-5v-5.5l-8.7-5l-8.7 5l17.4 10v20.6l-17.4 10l-17.4-10v-20.6l17.4-10l8.7 5v5.5l-8.7-5v-8.6l-8.7 5v14.1l8.7 5l8.7-5v-5.5h0z" />
+              {/* Epiroc Wordmark */}
+              <text x="95" y="60" fontFamily="Inter, sans-serif" fontWeight="900" fontSize="48" letterSpacing="-1">Epiroc</text>
             </svg>
           </div>
-          <div>
-            <h1 className="text-2xl font-black tracking-tight uppercase">Operations Development Pulse</h1>
-            <div className="flex items-center space-x-3 text-[10px] uppercase tracking-widest font-black opacity-80">
-              <span className="flex items-center">
-                {fileHandle ? <Wifi size={10} className="text-green-400 mr-1" /> : <WifiOff size={10} className="mr-1" />}
-                {fileHandle ? 'SHARED SYNC' : 'OFFLINE MODE'}
-              </span>
-              <span>•</span>
-              <span className="flex items-center">
-                <ShieldCheck size={10} className={`mr-1 ${backupDirHandle ? 'text-green-400' : 'text-gray-400'}`} />
-                BACKUP: {backupDirHandle ? 'LINKED' : 'UNLINKED'}
-              </span>
-            </div>
+
+          {/* Status Bar (functional text only) */}
+          <div className="flex items-center space-x-4 ml-2 text-[9px] uppercase tracking-[0.2em] font-black opacity-70">
+            <span className="flex items-center">
+              {fileHandle ? <Wifi size={10} className="mr-1.5" /> : <WifiOff size={10} className="mr-1.5" />}
+              {fileHandle ? 'NETWORK LEDGER ACTIVE' : 'LOCAL CACHE MODE'}
+            </span>
+            <span>•</span>
+            <span className="flex items-center">
+              <ShieldCheck size={10} className={`mr-1.5 ${backupDirHandle ? 'text-green-700' : ''}`} />
+              BACKUP: {backupDirHandle ? 'CONNECTED' : 'DISCONNECTED'}
+            </span>
           </div>
         </div>
         
@@ -258,29 +263,29 @@ const App: React.FC = () => {
 
         <div className="flex items-center space-x-4 z-10">
            {!isReadOnly && (
-              <button onClick={exportData} title="Export Database" className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition">
-                <Download size={20} />
+              <button onClick={exportData} title="Manual Data Export" className="p-3 bg-[#3d4d5b]/10 rounded-full hover:bg-[#3d4d5b]/20 transition group">
+                <Download size={20} className="group-hover:scale-110 transition" />
               </button>
            )}
            
            {fileHandle ? (
-             <div className="flex items-center bg-white/10 px-6 py-3 rounded-full border border-white/5 space-x-6 shadow-inner">
-                <div className="flex flex-col items-end border-r border-white/10 pr-6">
-                  <span className="text-[8px] opacity-50 font-black uppercase">Database Status</span>
+             <div className="flex items-center bg-[#3d4d5b]/5 px-6 py-3 rounded-full border border-[#3d4d5b]/10 space-x-6">
+                <div className="flex flex-col items-end border-r border-[#3d4d5b]/10 pr-6">
+                  <span className="text-[8px] font-black uppercase opacity-60">Sync Status</span>
                   <div className="flex items-center space-x-2">
-                    {isAutoSaving ? <RefreshCw size={12} className="text-[#FDB913] animate-spin" /> : <Save size={12} className="text-green-400" />}
-                    <span className="text-[10px] font-black">{isAutoSaving ? 'SYNCING' : 'ACTIVE'}</span>
+                    {isAutoSaving ? <RefreshCw size={12} className="animate-spin" /> : <Save size={12} />}
+                    <span className="text-[10px] font-black tracking-tighter">{isAutoSaving ? 'SYNCING' : 'SYNCHRONIZED'}</span>
                   </div>
                 </div>
                 <div className="flex flex-col items-end">
-                   <span className="text-[8px] opacity-50 font-black uppercase">Last Update</span>
-                   <span className="text-[10px] font-black text-[#FDB913]">{lastSyncTime ? lastSyncTime.toLocaleTimeString() : '--:--'}</span>
+                   <span className="text-[8px] font-black uppercase opacity-60">Last Updated</span>
+                   <span className="text-[10px] font-black">{lastSyncTime ? lastSyncTime.toLocaleTimeString() : '--:--'}</span>
                 </div>
              </div>
            ) : !isReadOnly && (
-             <button onClick={linkSharedFile} className="bg-black text-[#FDB913] hover:brightness-110 px-8 py-3 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl flex items-center space-x-3 transition-all border border-[#FDB913]/30">
+             <button onClick={linkSharedFile} className="bg-[#3d4d5b] text-[#FDB913] hover:brightness-110 px-8 py-4 rounded-full font-black text-xs uppercase tracking-[0.2em] shadow-xl flex items-center space-x-3 transition-all">
                <FileCode size={18} />
-               <span>Connect Network Drive</span>
+               <span>CONNECT TEAM LEDGER</span>
              </button>
            )}
         </div>
@@ -314,21 +319,20 @@ const App: React.FC = () => {
         {activeTab === 'kudos' && <KudosBoard kudos={data.kudos} users={data.users.map(u => u.name)} updateKudos={(kudos) => updateData({ kudos })} />}
         {activeTab === 'masters' && (
           <div className="space-y-6">
-
             <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
                <div className="flex items-center space-x-5">
                   <div className={`p-4 rounded-xl ${backupDirHandle ? 'bg-green-50 text-green-600' : 'bg-zinc-50 text-zinc-400'}`}>
                     <Database size={32} />
                   </div>
                   <div>
-                    <h3 className="text-xl font-black uppercase tracking-tight">Auto-Backup Engine</h3>
+                    <h3 className="text-xl font-black uppercase tracking-tight">Epiroc Daily Backup Engine</h3>
                     <p className="text-sm text-gray-500 font-bold uppercase tracking-widest">
-                      {backupDirHandle ? `Syncing Daily to: ${backupDirHandle.name}` : 'Select a local or network folder for daily database snapshots'}
+                      {backupDirHandle ? `Current Snapshot Target: ${backupDirHandle.name}` : 'Select a destination folder for daily database snapshots (Network Drive recommended)'}
                     </p>
                   </div>
                </div>
                <button onClick={linkBackupDir} className="bg-black text-[#FDB913] px-8 py-3 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl transition hover:brightness-110">
-                 {backupDirHandle ? 'Modify Backup Target' : 'Enable Daily Snapshots'}
+                 {backupDirHandle ? 'Change Target Folder' : 'Enable Daily Snapshot'}
                </button>
             </div>
             <Masters users={data.users} categories={data.categories} updateUsers={(users) => updateData({ users })} updateCategories={(categories) => updateData({ categories })} />
