@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { 
   format, addMonths, endOfMonth, 
   endOfWeek, eachDayOfInterval, isSameMonth, 
-  isSameDay, addDays 
+  isSameDay, addDays, isToday
 } from 'date-fns';
 import { Task, SafetyStatus } from '../types';
 import { ChevronLeft, ChevronRight, AlertCircle, CheckCircle2, Info } from 'lucide-react';
@@ -74,6 +74,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
       
       const isSelected = isSameDay(day, selectedDate);
       const isCurrentMonth = isSameMonth(day, monthStart);
+      const isTodayDate = isToday(day);
 
       days.push(
         <div
@@ -81,12 +82,21 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
           className={`min-h-[100px] border-r border-b border-gray-100 p-2 cursor-pointer transition-colors relative
             ${!isCurrentMonth ? 'bg-gray-50 text-gray-300' : 'bg-white'}
             ${isSelected ? 'bg-yellow-50/50 ring-1 ring-inset ring-[#FDB913]' : ''}
+            ${isTodayDate && !isSelected ? 'bg-gray-50 ring-2 ring-inset ring-black' : ''}
             hover:bg-gray-50
           `}
           onClick={() => onDateClick(day)}
         >
+          {isTodayDate && (
+              <div className="absolute top-1 right-1">
+                 <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                 </span>
+              </div>
+          )}
           <div className="flex justify-between items-start">
-            <span className={`text-sm font-bold ${isSelected ? 'text-[#FDB913]' : ''}`}>
+            <span className={`text-sm font-bold ${isSelected ? 'text-[#FDB913]' : isTodayDate ? 'text-black font-black' : ''}`}>
               {format(day, 'd')}
             </span>
             {status && (

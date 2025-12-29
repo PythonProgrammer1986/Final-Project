@@ -125,4 +125,5 @@ export interface AppState {
   safetyStatus: Record<string, { status: 'green' | 'yellow' | 'red'; notes: string }>;
   dailyAgenda: Record<string, string>;
   lastBackupDate?: string;
+  deletedItemIds?: string[]; // Tombstones for robust sync
 }

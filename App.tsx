@@ -5,7 +5,7 @@ import {
   Settings, Save, HardDrive, FileCode, Wifi, WifiOff,
   Lightbulb, Award, BarChart3, ListChecks, RefreshCw,
   Download, Upload, ShieldCheck, Database, History, Eye, Play,
-  AlertTriangle
+  AlertTriangle, RotateCw, Link, RefreshCcw
 } from 'lucide-react';
 import { AppState, Task, Project, User, Idea, Kudos, OKR, Booking } from './types';
 import { DEFAULT_USERS, DEFAULT_CATEGORIES, DEFAULT_AGENDA, BRAND } from './constants';
@@ -21,7 +21,7 @@ import HoursBooking from './components/HoursBooking';
 import { Logo } from './components/Logo';
 
 const STORAGE_KEY = 'epiroc_pulse_v5_final';
-const APP_VERSION = '5.7.1';
+const APP_VERSION = '5.7.3';
 
 const tabs = [
   { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
@@ -52,7 +52,8 @@ const App: React.FC = () => {
       bookings: [],
       categories: DEFAULT_CATEGORIES,
       safetyStatus: {},
-      dailyAgenda: DEFAULT_AGENDA
+      dailyAgenda: DEFAULT_AGENDA,
+      deletedItemIds: []
     };
   });
 
@@ -109,10 +110,21 @@ const App: React.FC = () => {
   }, [backupDirHandle, data.lastBackupDate]);
 
   const mergeData = (local: AppState, remote: AppState): AppState => {
+    // 1. Combine Tombstones (Deleted IDs) from both local and remote
+    const allDeletedIds = new Set([
+      ...(local.deletedItemIds || []),
+      ...(remote.deletedItemIds || [])
+    ]);
+
+    // 2. Helper to merge arrays while respecting tombstones
     const mergeById = (a: any[], b: any[]) => {
       const map = new Map();
       [...(a || []), ...(b || [])].forEach(item => {
-        if (item && item.id) map.set(item.id, item);
+        // Only add item if its ID is NOT in the deleted list
+        if (item && item.id && !allDeletedIds.has(item.id)) {
+          // If collision, prefer remote (latest server state) or implicit "last write" from auto-sync
+          map.set(item.id, item);
+        }
       });
       return Array.from(map.values());
     };
@@ -126,7 +138,8 @@ const App: React.FC = () => {
       kudos: mergeById(local.kudos, remote.kudos),
       okrs: mergeById(local.okrs, remote.okrs),
       bookings: mergeById(local.bookings, remote.bookings),
-      safetyStatus: { ...(local.safetyStatus || {}), ...(remote.safetyStatus || {}) }
+      safetyStatus: { ...(local.safetyStatus || {}), ...(remote.safetyStatus || {}) },
+      deletedItemIds: Array.from(allDeletedIds)
     };
   };
 
@@ -181,6 +194,35 @@ const App: React.FC = () => {
     a.click();
   };
 
+  const manualSync = async () => {
+    if (!fileHandle) return;
+    setIsAutoSaving(true);
+    try {
+      const file = await fileHandle.getFile();
+      const content = await file.text();
+      
+      const remoteData = JSON.parse(content);
+      const merged = mergeData(dataRef.current, remoteData);
+      
+      // Perform write-back to ensure file has our latest local changes too
+      // This mimics the auto-sync logic but forces it immediately
+      const mergedContent = JSON.stringify(merged, null, 2);
+      
+      // @ts-ignore
+      const writable = await fileHandle.createWritable();
+      await writable.write(mergedContent);
+      await writable.close();
+      
+      setData(merged);
+      setLastFileHash(mergedContent);
+      setLastSyncTime(new Date());
+    } catch (err) { 
+      console.error("Manual sync failed", err); 
+    } finally { 
+      setIsAutoSaving(false); 
+    }
+  };
+
   useEffect(() => {
     if (!fileHandle || isReadOnly) return;
     const interval = setInterval(async () => {
@@ -212,7 +254,33 @@ const App: React.FC = () => {
 
   const updateData = (newData: Partial<AppState>) => {
     if (isReadOnly) return;
-    setData(prev => ({ ...prev, ...newData }));
+    
+    setData(prev => {
+      const deletedIds = new Set(prev.deletedItemIds || []);
+      
+      // Detect deleted items by comparing prev vs newData arrays
+      const keysToCheck: (keyof AppState)[] = ['tasks', 'projects', 'ideas', 'kudos', 'okrs', 'bookings'];
+      
+      keysToCheck.forEach(key => {
+        if (newData[key] && Array.isArray(newData[key]) && Array.isArray(prev[key])) {
+          const prevArr = prev[key] as any[];
+          const newArr = newData[key] as any[];
+          
+          // If item existed in prev but not in new, it was deleted
+          prevArr.forEach(p => {
+             if (p.id && !newArr.some(n => n.id === p.id)) {
+               deletedIds.add(p.id);
+             }
+          });
+        }
+      });
+      
+      return { 
+        ...prev, 
+        ...newData,
+        deletedItemIds: Array.from(deletedIds)
+      };
+    });
   };
 
   return (
@@ -237,7 +305,7 @@ const App: React.FC = () => {
              <Logo />
           </div>
 
-          {/* Operational Status below logo - only icons and minimal functional text */}
+          {/* Operational Status below logo */}
           <div className="flex items-center space-x-6 ml-1 mt-2 text-[9px] uppercase tracking-[0.25em] font-black opacity-80">
             <span className="flex items-center">
               {fileHandle ? <Wifi size={11} className="mr-2" /> : <WifiOff size={11} className="mr-2" />}
@@ -260,24 +328,43 @@ const App: React.FC = () => {
            )}
            
            {fileHandle ? (
-             <div className="flex items-center bg-[#3d4d5b]/5 px-8 py-4 rounded-full border border-[#3d4d5b]/10 space-x-8">
-                <div className="flex flex-col items-end border-r border-[#3d4d5b]/10 pr-8">
-                  <span className="text-[9px] font-black uppercase opacity-60 tracking-widest">Database Sync</span>
-                  <div className="flex items-center space-x-2">
-                    {isAutoSaving ? <RefreshCw size={12} className="animate-spin" /> : <Save size={12} />}
-                    <span className="text-[11px] font-black tracking-tighter">{isAutoSaving ? 'SYNCING...' : 'UP TO DATE'}</span>
+             <div className="flex items-center bg-white/40 pl-2 pr-6 py-1.5 rounded-full border border-black/5 shadow-lg backdrop-blur-sm space-x-4">
+                <button 
+                  onClick={manualSync}
+                  title="Force Refresh & Sync"
+                  className="px-5 py-2.5 bg-black text-[#FDB913] rounded-full hover:bg-zinc-800 transition shadow-sm flex items-center space-x-2"
+                >
+                   <RotateCw size={14} className={isAutoSaving ? 'animate-spin' : ''} />
+                   <span className="text-[10px] font-black uppercase tracking-widest">SYNC NOW</span>
+                </button>
+
+                <div className="flex flex-col items-end border-r border-black/10 pr-4 py-1">
+                  <span className="text-[9px] font-black uppercase opacity-60 tracking-widest">Database</span>
+                  <div className="flex items-center space-x-1.5">
+                    {isAutoSaving ? <RefreshCw size={10} className="animate-spin" /> : <Save size={10} />}
+                    <span className="text-[10px] font-black tracking-tighter">{isAutoSaving ? 'SYNCING...' : 'LIVE'}</span>
                   </div>
                 </div>
-                <div className="flex flex-col items-end">
-                   <span className="text-[9px] font-black uppercase opacity-60 tracking-widest">Session End</span>
-                   <span className="text-[11px] font-black">{lastSyncTime ? lastSyncTime.toLocaleTimeString() : '--:--'}</span>
+                <div className="flex flex-col items-end py-1">
+                   <span className="text-[9px] font-black uppercase opacity-60 tracking-widest">Last Sync</span>
+                   <span className="text-[10px] font-black">{lastSyncTime ? lastSyncTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '--:--'}</span>
                 </div>
              </div>
            ) : !isReadOnly && (
-             <button onClick={linkSharedFile} className="bg-[#3d4d5b] text-[#FDB913] hover:brightness-110 px-10 py-5 rounded-full font-black text-xs uppercase tracking-[0.25em] shadow-2xl flex items-center space-x-4 transition-all">
-               <FileCode size={20} />
-               <span>ESTABLISH TEAM LINK</span>
-             </button>
+             <div className="flex items-center space-x-2">
+                 <button 
+                    onClick={() => window.location.reload()} 
+                    className="bg-white/80 hover:bg-white text-[#3d4d5b] px-6 py-5 rounded-full font-black text-xs uppercase tracking-widest shadow-sm flex items-center space-x-2 transition-all border border-black/5"
+                    title="Reload Application Data"
+                 >
+                     <RefreshCcw size={16} />
+                     <span>MANUAL REFRESH</span>
+                 </button>
+                 <button onClick={linkSharedFile} className="bg-[#3d4d5b] text-[#FDB913] hover:brightness-110 px-10 py-5 rounded-full font-black text-xs uppercase tracking-[0.25em] shadow-2xl flex items-center space-x-4 transition-all">
+                   <FileCode size={20} />
+                   <span>ESTABLISH TEAM LINK</span>
+                 </button>
+             </div>
            )}
         </div>
       </header>
