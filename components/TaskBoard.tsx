@@ -16,6 +16,17 @@ interface TaskBoardProps {
   updateTasks: (tasks: Task[]) => void;
 }
 
+const CATEGORY_ORDER = [
+  "Safety",
+  "Results Achieved",
+  "Priority",
+  "Information & Team Suggestions",
+  "Support Required",
+  "External Dependencies",
+  "Long Term Project",
+  "Short Term Project"
+];
+
 const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, projects, okrs, ideas = [], bookings, readOnly, updateTasks }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterOwner, setFilterOwner] = useState('All');
@@ -26,11 +37,24 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
   const [selectedOkrId, setSelectedOkrId] = useState<string>('');
 
   const filteredTasks = useMemo(() => {
-    return tasks.filter(t => {
+    const result = tasks.filter(t => {
       const matchSearch = t.task.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           t.owner.toLowerCase().includes(searchTerm.toLowerCase());
       const matchOwner = filterOwner === 'All' || t.owner === filterOwner;
       return matchSearch && matchOwner;
+    });
+
+    // Custom Sort by Taxonomy Category
+    return result.sort((a, b) => {
+      const indexA = CATEGORY_ORDER.indexOf(a.category);
+      const indexB = CATEGORY_ORDER.indexOf(b.category);
+      
+      const valA = indexA === -1 ? 999 : indexA;
+      const valB = indexB === -1 ? 999 : indexB;
+
+      if (valA !== valB) return valA - valB;
+      // Secondary sort by priority or status if categories are the same
+      return a.task.localeCompare(b.task);
     });
   }, [tasks, searchTerm, filterOwner]);
 
@@ -149,7 +173,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
                   <td className="px-6 py-5">
                     <p className="font-black text-zinc-900 text-sm leading-tight mb-1">{t.task}</p>
                     <div className="flex items-center space-x-2">
-                      <span className="text-[8px] font-black uppercase bg-zinc-100 text-zinc-500 px-2 py-0.5 rounded tracking-tighter">{t.category}</span>
+                      <span className="text-[8px] font-black uppercase bg-zinc-900 text-yellow-500 px-2 py-0.5 rounded tracking-tighter">{t.category}</span>
                       <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${getStatusColor(t.status)}`}>{t.status}</span>
                     </div>
                   </td>
@@ -179,7 +203,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
           <div className="bg-white rounded shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="p-8 bg-[#FDB913] text-black flex justify-between items-center shrink-0">
               <div>
@@ -306,7 +330,6 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
                   {editingTask?.history?.map((entry, idx) => (
                     <div key={idx} className="flex space-x-6">
                       <div className="w-28 shrink-0 text-[10px] font-black text-gray-400 mt-1 uppercase tracking-tighter">
-                        {/* Fix: Replaced parseISO with native Date constructor */}
                         {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
                       </div>
                       <div className="flex-1 pb-6 border-l-2 border-zinc-100 pl-8 relative">

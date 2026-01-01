@@ -109,7 +109,15 @@ export interface User {
   capacity: number;
 }
 
-export type SafetyStatusEntry = { status: 'green' | 'yellow' | 'red'; notes: string };
+export type SafetyStatusEntry = { 
+  status: 'green' | 'yellow' | 'red'; 
+  notes: string;
+  safetyDaily?: string;
+  resultsAchieved?: string;
+  teamSuggestions?: string;
+  supportRequired?: string;
+  externalDependencies?: string;
+};
 export type SafetyStatus = Record<string, SafetyStatusEntry>;
 
 export interface AppState {
@@ -122,7 +130,7 @@ export interface AppState {
   users: User[];
   bookings: Booking[];
   categories: string[];
-  safetyStatus: Record<string, { status: 'green' | 'yellow' | 'red'; notes: string }>;
+  safetyStatus: SafetyStatus;
   dailyAgenda: Record<string, string>;
   lastBackupDate?: string;
   deletedItemIds?: string[]; // Tombstones for robust sync
