@@ -1,13 +1,15 @@
 
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   format, addMonths, endOfMonth, 
   endOfWeek, eachDayOfInterval, isSameMonth, 
-  isSameDay, addDays, isToday
+  isSameDay, isToday
 } from 'date-fns';
 import { Task, SafetyStatus } from '../types';
-import { ChevronLeft, ChevronRight, AlertCircle, CheckCircle2, Info, ListTodo, Target, ShieldAlert, Lightbulb, Users, ExternalLink } from 'lucide-react';
-import { BRAND } from '../constants';
+import { 
+  ChevronLeft, ChevronRight, Info, ListTodo, 
+  Target, ShieldAlert, Lightbulb, Users, ExternalLink 
+} from 'lucide-react';
 
 interface CalendarViewProps {
   tasks: Task[];
@@ -15,9 +17,26 @@ interface CalendarViewProps {
   updateSafetyStatus: (status: SafetyStatus) => void;
 }
 
+// LogItem defined outside to prevent focus loss during re-renders
+const LogItem = ({ icon: Icon, label, value, field, placeholder, onUpdate }: any) => (
+  <div className="space-y-1.5">
+    <div className="flex items-center space-x-2 text-zinc-400">
+      <Icon size={12} />
+      <label className="text-[10px] font-black uppercase tracking-widest">{label}</label>
+    </div>
+    <textarea
+      className="w-full border border-zinc-100 rounded-lg p-3 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-black bg-zinc-50/50 hover:bg-white transition-all"
+      rows={2}
+      placeholder={placeholder}
+      value={value || ''}
+      onChange={(e) => onUpdate(field, e.target.value)}
+    ></textarea>
+  </div>
+);
+
 const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, updateSafetyStatus }) => {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [currentMonth, setCurrentMonth] = React.useState(new Date());
+  const [selectedDate, setSelectedDate] = React.useState(new Date());
 
   const onDateClick = (day: Date) => {
     setSelectedDate(day);
@@ -139,22 +158,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
   const selectedTasks = tasks.filter(t => t.dueDate === selectedDateStr);
   const currentSafety = safetyStatus[selectedDateStr] || { status: 'green', notes: '' };
 
-  const LogItem = ({ icon: Icon, label, value, field, placeholder }: any) => (
-    <div className="space-y-1.5">
-      <div className="flex items-center space-x-2 text-zinc-400">
-        <Icon size={12} />
-        <label className="text-[10px] font-black uppercase tracking-widest">{label}</label>
-      </div>
-      <textarea
-        className="w-full border border-zinc-100 rounded-lg p-3 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-black bg-zinc-50/50 hover:bg-white transition-all"
-        rows={2}
-        placeholder={placeholder}
-        value={value || ''}
-        onChange={(e) => updateSelectedDateData(field, e.target.value)}
-      ></textarea>
-    </div>
-  );
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden sticky top-24">
@@ -196,6 +199,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
               label="Safety Daily Report" 
               field="safetyDaily"
               value={currentSafety.safetyDaily} 
+              onUpdate={updateSelectedDateData}
               placeholder="Incident reports, inspections, toolbox talks..." 
             />
             <LogItem 
@@ -203,13 +207,15 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
               label="Results Achieved" 
               field="resultsAchieved"
               value={currentSafety.resultsAchieved} 
+              onUpdate={updateSelectedDateData}
               placeholder="Key performance milestones hit today..." 
             />
             <LogItem 
               icon={Lightbulb} 
-              label="Team Suggestions" 
+              label="Information & Team Suggestions" 
               field="teamSuggestions"
               value={currentSafety.teamSuggestions} 
+              onUpdate={updateSelectedDateData}
               placeholder="Continuous improvement ideas from the floor..." 
             />
             <LogItem 
@@ -217,6 +223,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
               label="Support Required" 
               field="supportRequired"
               value={currentSafety.supportRequired} 
+              onUpdate={updateSelectedDateData}
               placeholder="Escalations, cross-team help needed..." 
             />
             <LogItem 
@@ -224,6 +231,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
               label="External Dependencies" 
               field="externalDependencies"
               value={currentSafety.externalDependencies} 
+              onUpdate={updateSelectedDateData}
               placeholder="Vendor delays, shipping status..." 
             />
 
@@ -233,6 +241,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
                 label="General Shift Notes" 
                 field="notes"
                 value={currentSafety.notes} 
+                onUpdate={updateSelectedDateData}
                 placeholder="Misc updates..." 
               />
             </div>

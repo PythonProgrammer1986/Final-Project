@@ -16,6 +16,7 @@ interface TaskBoardProps {
   updateTasks: (tasks: Task[]) => void;
 }
 
+// Strictly ordered hierarchy as requested
 const CATEGORY_ORDER = [
   "Safety",
   "Results Achieved",
@@ -44,7 +45,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
       return matchSearch && matchOwner;
     });
 
-    // Custom Sort by Taxonomy Category
+    // Custom Sort by Taxonomy Category Hierarchy
     return result.sort((a, b) => {
       const indexA = CATEGORY_ORDER.indexOf(a.category);
       const indexB = CATEGORY_ORDER.indexOf(b.category);
@@ -53,7 +54,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, users, categories, project
       const valB = indexB === -1 ? 999 : indexB;
 
       if (valA !== valB) return valA - valB;
-      // Secondary sort by priority or status if categories are the same
+      // Secondary sort alphabetically if categories are identical
       return a.task.localeCompare(b.task);
     });
   }, [tasks, searchTerm, filterOwner]);
