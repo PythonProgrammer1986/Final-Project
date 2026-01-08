@@ -8,33 +8,36 @@ import {
 import { Task, SafetyStatus } from '../types';
 import { 
   ChevronLeft, ChevronRight, Info, ListTodo, 
-  Target, ShieldAlert, Lightbulb, Users, ExternalLink 
+  Target, ShieldAlert, Lightbulb, Users, ExternalLink, StickyNote
 } from 'lucide-react';
 
 interface CalendarViewProps {
   tasks: Task[];
   safetyStatus: SafetyStatus;
+  dailyFollowUp: string;
   updateSafetyStatus: (status: SafetyStatus) => void;
+  updateDailyFollowUp: (val: string) => void;
 }
 
 // LogItem defined outside to prevent focus loss during re-renders
-const LogItem = ({ icon: Icon, label, value, field, placeholder, onUpdate }: any) => (
+const LogItem = ({ icon: Icon, label, value, field, placeholder, onUpdate, isGlobal }: any) => (
   <div className="space-y-1.5">
     <div className="flex items-center space-x-2 text-zinc-400">
       <Icon size={12} />
       <label className="text-[10px] font-black uppercase tracking-widest">{label}</label>
+      {isGlobal && <span className="text-[7px] bg-zinc-100 text-zinc-500 px-1 rounded">PERSISTENT</span>}
     </div>
     <textarea
-      className="w-full border border-zinc-100 rounded-lg p-3 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-black bg-zinc-50/50 hover:bg-white transition-all"
+      className={`w-full border rounded-lg p-3 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-black transition-all ${isGlobal ? 'border-yellow-200 bg-yellow-50/30' : 'border-zinc-100 bg-zinc-50/50 hover:bg-white'}`}
       rows={2}
       placeholder={placeholder}
       value={value || ''}
-      onChange={(e) => onUpdate(field, e.target.value)}
+      onChange={(e) => onUpdate(isGlobal ? e.target.value : field, isGlobal ? undefined : e.target.value)}
     ></textarea>
   </div>
 );
 
-const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, updateSafetyStatus }) => {
+const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, dailyFollowUp, updateSafetyStatus, updateDailyFollowUp }) => {
   const [currentMonth, setCurrentMonth] = React.useState(new Date());
   const [selectedDate, setSelectedDate] = React.useState(new Date());
 
@@ -194,6 +197,16 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, safetyStatus, update
           </div>
 
           <div className="space-y-6">
+            {/* Task for Daily Follow-up (Persistent) */}
+            <LogItem 
+              icon={StickyNote} 
+              label="Tasks for Daily Follow-up" 
+              isGlobal={true}
+              value={dailyFollowUp} 
+              onUpdate={(val: string) => updateDailyFollowUp(val)}
+              placeholder="Important points to track daily until deleted..." 
+            />
+
             <LogItem 
               icon={ShieldAlert} 
               label="Safety Daily Report" 

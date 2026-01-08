@@ -8,13 +8,13 @@ import { AppState, Task, Project, SafetyStatusEntry } from '../types';
 import { BRAND } from '../constants';
 import { 
   Briefcase, CheckCircle2, Clock, AlertTriangle, 
-  Users, Target, Calendar, ZoomIn, ZoomOut, Layers, Filter, CornerDownRight
+  Users, Target, Calendar, ZoomIn, ZoomOut, Layers, Filter, CornerDownRight, Search
 } from 'lucide-react';
 import { 
   format, differenceInDays, 
   endOfMonth, endOfYear, addMonths, eachMonthOfInterval,
   isSameMonth, endOfWeek, eachDayOfInterval, eachWeekOfInterval, 
-  addWeeks, isWithinInterval, addDays
+  addWeeks, isWithinInterval, addDays, parseISO
 } from 'date-fns';
 
 const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
@@ -22,6 +22,7 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
   const [utilizationFilter, setUtilizationFilter] = useState<'week' | 'month' | 'year'>('month');
   const [stakeholderFilter, setStakeholderFilter] = useState('All');
   const [waterfallMode, setWaterfallMode] = useState<'timeline' | 'hierarchy'>('timeline');
+  const [waterfallProjectFilter, setWaterfallProjectFilter] = useState<string>('all');
 
   // Safety Analytics Aggregation
   const safetyStats = useMemo(() => {
@@ -42,12 +43,11 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
     ].filter(s => s.value > 0 || s.name === 'Safe Ops');
   }, [state.safetyStatus]);
 
-  // Enhanced Resource Utilization with Accurate Daily-Rate Formulas
+  // Enhanced Resource Utilization with Actual Bookings and Standalone Tasks
   const workloadData = useMemo(() => {
     const now = new Date();
     let intervals: Date[] = [];
     
-    // 1. Generate Time Intervals
     if (utilizationFilter === 'week') {
       intervals = eachWeekOfInterval({ start: addWeeks(now, -2), end: addWeeks(now, 5) });
     } else if (utilizationFilter === 'month') {
@@ -59,7 +59,6 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
     }
 
     return intervals.map(start => {
-      // 2. Determine Interval Boundaries
       let end: Date;
       let label: string;
 
@@ -74,76 +73,72 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
         label = format(start, 'yyyy');
       }
 
-      const daysInInterval = differenceInDays(end, start);
+      const daysInInterval = Math.max(1, differenceInDays(end, start));
 
-      // 3. Calculate Capacity (Daily Rate Basis)
+      // Filter users for capacity calculation
       const filteredUsers = stakeholderFilter === 'All' 
         ? state.users 
         : state.users.filter(u => u.name === stakeholderFilter);
         
-      // Annualize monthly capacity to get a precise daily rate
-      // (Monthly * 12) / 365 = Daily Hours Available
       const totalDailyCapacity = filteredUsers.reduce((acc, u) => acc + (u.capacity || 160), 0) * 12 / 365;
       const intervalCapacity = totalDailyCapacity * daysInInterval;
 
-      let assigned = 0;
+      let projected = 0;
+      let actual = 0;
 
-      // 4. Calculate Project Load (Distributed over Duration)
+      // Projected from Projects
       state.projects.forEach(p => {
         if (p.status === 'Completed' || p.status === 'Cancelled') return;
         if (stakeholderFilter !== 'All' && p.manager !== stakeholderFilter) return;
 
-        const pStart = new Date(p.startDate);
-        const pEnd = new Date(p.endDate);
-        // Use exclusive end date for accurate duration math
-        const pEndExclusive = addDays(pEnd, 1);
+        const pStart = parseISO(p.startDate);
+        const pEnd = addDays(parseISO(p.endDate), 1);
 
-        // Determine overlap with current interval
         const startOverlap = pStart > start ? pStart : start;
-        const endOverlap = pEndExclusive < end ? pEndExclusive : end;
+        const endOverlap = pEnd < end ? pEnd : end;
 
         if (startOverlap < endOverlap) {
            const overlapDays = differenceInDays(endOverlap, startOverlap);
-           const totalProjectDays = Math.max(1, differenceInDays(pEndExclusive, pStart));
-           
-           // Daily burn rate = Total Est Hours / Total Days
-           const dailyLoad = (p.hours || 0) / totalProjectDays;
-           assigned += dailyLoad * overlapDays;
+           const totalProjectDays = Math.max(1, differenceInDays(pEnd, pStart));
+           projected += (p.hours / totalProjectDays) * overlapDays;
         }
       });
 
-      // 5. Calculate Standalone Task Load (Distributed or Point Load)
+      // Projected from Standalone Tasks
       state.tasks.forEach(t => {
-        if (t.status === 'Completed') return;
-        if (t.project) return; // Skip tasks linked to projects to avoid double counting (Project Est Hours is master)
+        if (t.status === 'Completed' || t.project) return;
         if (stakeholderFilter !== 'All' && t.owner !== stakeholderFilter) return;
 
-        const tDue = new Date(t.dueDate);
-        const tStart = t.startDate ? new Date(t.startDate) : tDue; // Fallback to due date if no start
-        
-        // Sanity check dates
-        const validStart = tStart > tDue ? tDue : tStart;
-        const tEndExclusive = addDays(tDue, 1);
+        const tStart = t.startDate ? parseISO(t.startDate) : parseISO(t.dueDate);
+        const tEnd = addDays(parseISO(t.dueDate), 1);
 
-        const startOverlap = validStart > start ? validStart : start;
-        const endOverlap = tEndExclusive < end ? tEndExclusive : end;
+        const startOverlap = tStart > start ? tStart : start;
+        const endOverlap = tEnd < end ? tEnd : end;
 
         if (startOverlap < endOverlap) {
             const overlapDays = differenceInDays(endOverlap, startOverlap);
-            const totalTaskDays = Math.max(1, differenceInDays(tEndExclusive, validStart));
-            
-            const dailyLoad = (t.hours || 0) / totalTaskDays;
-            assigned += dailyLoad * overlapDays;
+            const totalTaskDays = Math.max(1, differenceInDays(tEnd, tStart));
+            projected += (t.hours / totalTaskDays) * overlapDays;
+        }
+      });
+
+      // Actual from Time Logs
+      state.bookings.forEach(b => {
+        if (stakeholderFilter !== 'All' && b.userId !== stakeholderFilter) return;
+        const bDate = parseISO(b.date);
+        if (isWithinInterval(bDate, { start, end: addDays(end, -1) })) {
+           actual += b.hours;
         }
       });
 
       return { 
         name: label, 
-        assigned: Math.round(assigned), 
+        projected: Math.round(projected), 
+        actual: Math.round(actual),
         capacity: Math.round(intervalCapacity) 
       };
     });
-  }, [state.tasks, state.projects, state.users, utilizationFilter, stakeholderFilter]);
+  }, [state.tasks, state.projects, state.users, state.bookings, utilizationFilter, stakeholderFilter]);
 
   // Waterfall Range Tracking
   const timelineRange = useMemo(() => {
@@ -164,34 +159,51 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
     return { start, end, total: differenceInDays(end, start) + 1 };
   }, [timelineZoom]);
 
-  // Waterfall Visualization Items
+  // Waterfall Visualization Items with Filter
   const waterfallItems = useMemo(() => {
     let rawItems = [];
 
+    // Apply project filter logic
     if (waterfallMode === 'hierarchy') {
-        // Group by Project
-        const projects = state.projects.filter(p => p.status !== 'Completed');
+        const projects = state.projects.filter(p => {
+            if (waterfallProjectFilter === 'all') return p.status !== 'Completed';
+            if (waterfallProjectFilter === 'none') return false;
+            return p.id === waterfallProjectFilter;
+        });
+
         projects.forEach(p => {
             rawItems.push({...p, type: 'Project', name: p.name, end: p.endDate, progress: p.progress || 0}); 
-            // Find tasks linked to this project
             const linkedTasks = state.tasks.filter(t => t.project === p.id && t.status !== 'Completed');
             linkedTasks.forEach(t => {
                 rawItems.push({...t, type: 'Task', name: t.task, end: t.dueDate, isChild: true});
             });
         });
-        // Add orphaned tasks
-        const orphanTasks = state.tasks.filter(t => !t.project && t.status !== 'Completed');
-        orphanTasks.forEach(t => {
-             rawItems.push({...t, type: 'Task', name: t.task, end: t.dueDate});
+
+        if (waterfallProjectFilter === 'all' || waterfallProjectFilter === 'none') {
+            const orphanTasks = state.tasks.filter(t => !t.project && t.status !== 'Completed');
+            orphanTasks.forEach(t => {
+                rawItems.push({...t, type: 'Task', name: t.task, end: t.dueDate});
+            });
+        }
+    } else {
+        const filteredTasks = state.tasks.filter(t => {
+            if (t.status === 'Completed') return false;
+            if (waterfallProjectFilter === 'all') return true;
+            if (waterfallProjectFilter === 'none') return !t.project;
+            return t.project === waterfallProjectFilter;
+        });
+        
+        const filteredProjects = state.projects.filter(p => {
+            if (p.status === 'Completed') return false;
+            if (waterfallProjectFilter === 'all') return true;
+            if (waterfallProjectFilter === 'none') return false;
+            return p.id === waterfallProjectFilter;
         });
 
-    } else {
-        // Flat timeline view
         rawItems = [
-            ...state.tasks.filter(t => t.status !== 'Completed').map(t => ({...t, type: 'Task', name: t.task, end: t.dueDate})),
-            ...state.projects.filter(p => p.status !== 'Completed').map(p => ({...p, type: 'Project', name: p.name, end: p.endDate, progress: p.progress || 0}))
+            ...filteredTasks.map(t => ({...t, type: 'Task', name: t.task, end: t.dueDate})),
+            ...filteredProjects.map(p => ({...p, type: 'Project', name: p.name, end: p.endDate, progress: p.progress || 0}))
         ];
-        // Sort by start date
         rawItems.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
     }
 
@@ -210,9 +222,8 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
         widthPct: Math.max(1, Math.min(100 - startPct, widthPct)) 
       };
     }).filter(i => (i.startPct < 100 && (i.startPct + i.widthPct) > 0) || i.isChild);
-  }, [state.tasks, state.projects, timelineRange, waterfallMode]);
+  }, [state.tasks, state.projects, timelineRange, waterfallMode, waterfallProjectFilter]);
 
-  // Timeline Ruler Tick Generation
   const rulerTicks = useMemo(() => {
     if (timelineZoom === 'year') {
       return eachMonthOfInterval({ start: timelineRange.start, end: timelineRange.end }).map(m => ({
@@ -256,6 +267,16 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
               </div>
            </div>
            <div className="flex space-x-4 items-center">
+               <select 
+                 className="bg-zinc-100 border-none rounded px-3 py-1.5 text-[9px] font-black uppercase outline-none focus:ring-1 focus:ring-black"
+                 value={waterfallProjectFilter}
+                 onChange={(e) => setWaterfallProjectFilter(e.target.value)}
+               >
+                 <option value="all">All Operations</option>
+                 <option value="none">Standalone Only</option>
+                 {state.projects.map(p => <option key={p.id} value={p.id}>PRJ: {p.name}</option>)}
+               </select>
+
                <div className="flex bg-zinc-100 p-1 rounded-md items-center">
                   <button onClick={() => setWaterfallMode('timeline')} className={`px-3 py-1.5 text-[9px] font-black uppercase rounded flex items-center space-x-1 transition ${waterfallMode === 'timeline' ? 'bg-white shadow text-black' : 'text-gray-400'}`}>
                       <span>Timeline</span>
@@ -274,7 +295,6 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
         </div>
 
         <div className="relative border-l border-zinc-100 ml-4 pb-8 overflow-x-auto custom-scrollbar">
-          {/* Timeline Ruler */}
           <div className="h-10 w-full border-b border-zinc-200 relative mb-8 min-w-[1000px]">
              {rulerTicks.map((tick, i) => (
                <div key={i} className="absolute border-l border-zinc-300 h-3 top-7" style={{ left: `${tick.pos}%` }}>
@@ -289,7 +309,6 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
              ) : waterfallItems.map((item) => (
                <div key={item.id} className="relative group">
                  <div className="flex items-center mb-2 ml-4">
-                    {/* Visual Connector for Child Tasks */}
                     {item.isChild && (
                         <div className="w-4 h-4 mr-2 text-gray-300 flex items-center justify-center">
                             <CornerDownRight size={14} />
@@ -346,8 +365,9 @@ const Dashboard: React.FC<{ state: AppState }> = ({ state }) => {
                 <YAxis tick={{fontSize: 10, fill: '#bbb'}} axisLine={false} tickLine={false} />
                 <Tooltip cursor={{fill: '#fcfcfc'}} contentStyle={{backgroundColor: '#000', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '10px'}} />
                 <Legend wrapperStyle={{fontSize: '9px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.1em', paddingTop: '20px'}} />
-                <Bar name="Projected Load" dataKey="assigned" fill="#000" radius={[4, 4, 0, 0]} barSize={28} />
-                <Bar name="Capacity Limit" dataKey="capacity" fill="#FDB913" radius={[4, 4, 0, 0]} barSize={28} />
+                <Bar name="Projected Load" dataKey="projected" fill="#000" radius={[4, 4, 0, 0]} barSize={28} />
+                <Bar name="Actual Use" dataKey="actual" fill="#FDB913" radius={[4, 4, 0, 0]} barSize={14} style={{ transform: 'translateX(-7px)' }} />
+                <Bar name="Capacity Limit" dataKey="capacity" fill="#bbb" fillOpacity={0.2} radius={[4, 4, 0, 0]} barSize={28} />
               </BarChart>
             </ResponsiveContainer>
           </div>

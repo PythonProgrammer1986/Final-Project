@@ -134,4 +134,5 @@ export interface AppState {
   dailyAgenda: Record<string, string>;
   lastBackupDate?: string;
   deletedItemIds?: string[]; // Tombstones for robust sync
+  dailyFollowUp?: string; // Persistent note across all calendar days
 }
